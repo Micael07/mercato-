@@ -5,7 +5,7 @@ import { Ban, CalendarPlus, Copy, KeyRound, Plus, ShieldCheck, Unlock } from "lu
 import { useSession } from "@/components/session-provider";
 import { useToast } from "@/components/ui/toast";
 import { formatCnpjCpf, formatDate, formatDateTime } from "@/lib/format";
-import { Badge, Button, Drawer, Field, Input, Modal, Panel, Textarea, type BadgeTone } from "@/components/ui/primitives";
+import { Badge, Button, Drawer, Field, Input, Modal, Panel, Select, Textarea, type BadgeTone } from "@/components/ui/primitives";
 import { ColumnDef, DataTable } from "@/components/ui/data-table";
 
 type State = "ok" | "expiring" | "expired" | "pending" | "suspended";
@@ -39,6 +39,17 @@ interface LicenseEvent {
   createdAt: string;
 }
 
+interface Member {
+  membershipId: string;
+  userId: string;
+  name: string;
+  email: string;
+  roleCode: string;
+  status: string;
+  lastLoginAt: string | null;
+}
+const ROLE_LABELS: Record<string, string> = { admin: "Administrador", manager: "Gerente", cashier: "Caixa / Operador", stockist: "Estoquista" };
+
 const EVENT_LABELS: Record<string, string> = {
   created: "Cliente criado",
   released: "Acesso liberado",
@@ -71,8 +82,15 @@ const FILTERS: Array<{ id: string; label: string; match: (r: ClientRow) => boole
 
 function toDateInput(value: string | null) {
   if (!value) return "";
-  const d = new Date(new Date(value).getTime() - 3 * 3600_000); // dia em Brasília
-  return d.toISOString().slice(0, 10);
+  const d = new Date(value); // dia no fuso do navegador, o mesmo usado nas datas da tela
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** Vencimento vale até 23:59:59 do dia escolhido, no fuso do navegador. */
+function endOfDayIso(date: string) {
+  const [y, m, d] = date.split("-").map(Number);
+  return new Date(y, m - 1, d, 23, 59, 59).toISOString();
 }
 
 export default function PlataformaPage() {
@@ -85,6 +103,7 @@ export default function PlataformaPage() {
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [events, setEvents] = useState<LicenseEvent[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
   const [busy, setBusy] = useState(false);
   const [plan, setPlan] = useState("");
   const [notes, setNotes] = useState("");
@@ -109,9 +128,26 @@ export default function PlataformaPage() {
 
   async function open(row: ClientRow) {
     setSelectedId(row.id); setPlan(row.licensePlan ?? ""); setNotes(row.licenseNotes ?? "");
-    setExpiry(toDateInput(row.licenseExpiresAt)); setPayNote(""); setEvents([]);
-    const res = await fetch(`/api/platform/companies/${row.id}`, { cache: "no-store" });
+    setExpiry(toDateInput(row.licenseExpiresAt)); setPayNote(""); setEvents([]); setMembers([]);
+    const [res, mres] = await Promise.all([
+      fetch(`/api/platform/companies/${row.id}`, { cache: "no-store" }),
+      fetch(`/api/platform/companies/${row.id}/members`, { cache: "no-store" }),
+    ]);
     if (res.ok) setEvents((await res.json()).events ?? []);
+    if (mres.ok) setMembers((await mres.json()).members ?? []);
+  }
+
+  async function updateMember(member: Member, change: { roleCode?: string; status?: string }, success: string) {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/platform/companies/${selected.id}/members`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ membershipId: member.membershipId, ...change }) });
+      const data = await res.json();
+      if (!res.ok) { toast({ type: "error", title: data.error || "Não foi possível alterar o usuário." }); return; }
+      toast({ type: "success", title: success });
+      const mres = await fetch(`/api/platform/companies/${selected.id}/members`, { cache: "no-store" });
+      if (mres.ok) setMembers((await mres.json()).members ?? []);
+    } finally { setBusy(false); }
   }
 
   async function patch(body: Record<string, unknown>, success: string) {
@@ -253,7 +289,7 @@ export default function PlataformaPage() {
               </div>
               <Field label="Notas internas (o cliente não vê)"><Textarea rows={3} maxLength={2000} value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
               <div className="flex flex-wrap gap-2">
-                <Button variant="outline" loading={busy} onClick={() => void patch({ plan, notes, expiresAt: expiry || null }, "Dados salvos")}>Salvar plano, vencimento e notas</Button>
+                <Button variant="outline" loading={busy} onClick={() => void patch({ plan, notes, expiresAt: expiry ? endOfDayIso(expiry) : null }, "Dados salvos")}>Salvar plano, vencimento e notas</Button>
                 {selected.licenseStatus !== "trial" && <Button variant="ghost" loading={busy} onClick={() => void patch({ licenseStatus: "trial" }, "Marcado como período de teste")}>Marcar como teste</Button>}
               </div>
             </section>
@@ -268,6 +304,35 @@ export default function PlataformaPage() {
               </div>
               <p className="text-[10px] text-slate-400">Bloqueio vale na hora, inclusive para quem já está logado. A senha provisória é do administrador ({selected.adminEmail ?? "—"}) e encerra as sessões abertas dele.</p>
               <p className="text-[10px] text-slate-400">{selected.userCount} usuário(s) · {selected.establishmentCount} estabelecimento(s) · último acesso {selected.lastLoginAt ? formatDateTime(selected.lastLoginAt) : "nunca"}</p>
+            </section>
+
+            <section className="space-y-2 border-t border-slate-100 pt-4">
+              <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Usuários desta empresa ({members.length})</h4>
+              {members.length === 0 ? <p className="text-slate-400">Nenhum usuário.</p> : (
+                <ul className="divide-y divide-slate-100">
+                  {members.map((m) => (
+                    <li key={m.membershipId} className="space-y-2 py-2.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-slate-800">{m.name}</p>
+                          <p className="truncate text-[11px] text-slate-400">{m.email}</p>
+                          <p className="text-[10px] text-slate-400">Último acesso: {m.lastLoginAt ? formatDateTime(m.lastLoginAt) : "nunca"}</p>
+                        </div>
+                        <Badge tone={m.status === "active" ? "success" : "neutral"}>{m.status === "active" ? "Ativo" : m.status === "pending" ? "Pendente" : "Bloqueado"}</Badge>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Select aria-label={`Perfil de ${m.name}`} value={m.roleCode} disabled={busy} onChange={(e) => void updateMember(m, { roleCode: e.target.value }, `Perfil de ${m.name} alterado`)} className="flex-1">
+                          {Object.entries(ROLE_LABELS).map(([code, label]) => <option key={code} value={code}>{label}</option>)}
+                        </Select>
+                        {m.status === "active"
+                          ? <Button size="sm" variant="danger" disabled={busy} onClick={() => void updateMember(m, { status: "inactive" }, `${m.name} bloqueado`)}><Ban className="h-3.5 w-3.5" />Bloquear</Button>
+                          : <Button size="sm" variant="success" disabled={busy} onClick={() => void updateMember(m, { status: "active" }, `${m.name} reativado`)}><Unlock className="h-3.5 w-3.5" />Reativar</Button>}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="text-[10px] text-slate-400">Bloquear um usuário vale na hora, mesmo logado. A licença da empresa não muda. A empresa sempre mantém ao menos um administrador ativo.</p>
             </section>
 
             <section className="space-y-2 border-t border-slate-100 pt-4">

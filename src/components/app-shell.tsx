@@ -7,7 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   BarChart3, ShoppingCart, Receipt, Wallet, Package, Boxes, ClipboardCheck,
   FolderOpen, Truck, Users, Landmark, Building2, UserCog, ShieldCheck,
-  Settings, FileSearch, KeyRound, ChevronDown, ChevronRight, LogOut, Search, UserRound, Store,
+  Settings, FileSearch, KeyRound, LifeBuoy, ChevronDown, ChevronRight, LogOut, Search, UserRound, Store,
 } from "lucide-react";
 import { useSession } from "@/components/session-provider";
 import { useToast } from "@/components/ui/toast";
@@ -49,6 +49,7 @@ const MODULES: Module[] = [
     { href: "/configuracoes", label: "Configurações", icon: Settings, permission: "settings.manage" },
     { href: "/auditoria", label: "Auditoria", icon: FileSearch, permission: "audit.read" },
   ] },
+  { id: "help", label: "Ajuda rápida", icon: LifeBuoy, direct: true, entries: [{ href: "/ajuda", label: "Ajuda rápida", icon: LifeBuoy }] },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -85,7 +86,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const matching = (entry: NavEntry) => entry.href === "/" ? pathname === "/" : pathname === entry.href || pathname.startsWith(`${entry.href}/`);
   const activeModule = visibleModules.find((module) => module.entries.some(matching));
   const activeEntry = entries.find(matching);
-  const currentLabel = pathname === "/configuracoes/publicacao" ? "Publicação e diagnóstico" : pathname === "/plataforma" ? "Clientes e licenças" : activeEntry?.label || "Sistema";
+  const currentLabel = pathname === "/configuracoes/publicacao" ? "Publicação e diagnóstico" : pathname === "/plataforma" ? "Clientes e licenças" : pathname === "/ajuda" ? "Ajuda rápida" : activeEntry?.label || "Sistema";
   const companyEntry = session.availableCompanies.find((company) => company.companyId === session.company.id);
   const role = ROLE_DEFINITIONS[session.membership.roleCode]?.name || session.membership.roleCode;
   const quickEntries = entries.filter((entry) => entry.label.toLocaleLowerCase("pt-BR").includes(quickQuery.toLocaleLowerCase("pt-BR")));

@@ -99,7 +99,9 @@ Se o build falhar, a mensagem aponta a variável faltando (ex.: “use a conexã
 
 **Renovar:** abra o cliente → **+30 dias**. Soma a partir do vencimento atual (ou de hoje, se já venceu).
 **Bloquear:** **Bloquear acesso agora**. Vale na hora, até para quem está logado. **Reativar acesso** desfaz.
+**Usuários do cliente:** no cliente, em **Usuários desta empresa**, troque o perfil (administrador, gerente, operador de caixa, estoquista) ou **Bloquear / Reativar** um usuário. Vale na hora e não mexe na licença da empresa.
 **Esqueceu a senha:** **Gerar senha provisória** (o sistema não envia e-mail). Encerra as sessões abertas dele.
+**Ajuda rápida:** o menu **Ajuda rápida** tem perguntas e respostas pesquisáveis para os usuários; quem é dono vê também um grupo só para você.
 **Aviso de vencimento:** nos 7 últimos dias o cliente vê uma faixa amarela. Vencida a licença, o login informa que precisa regularizar. Para exibir o seu WhatsApp nessa mensagem, adicione em **Environment** a variável `NEXT_PUBLIC_SUPPORT_CONTACT` (ex.: `WhatsApp (92) 9xxxx-xxxx`) e faça um novo deploy.
 
 Só quem está em `PLATFORM_ADMIN_EMAILS` acessa essa área. Clientes não criam empresas nem alteram a própria licença. Tudo fica registrado no histórico e na auditoria.

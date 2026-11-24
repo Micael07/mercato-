@@ -150,6 +150,9 @@ export async function PATCH(req: Request) {
 
   const newRole = body?.roleCode ? String(body.roleCode) : target.roleCode;
   const newStatus = body?.status ? String(body.status) : target.status;
+  if (!["admin", "manager", "cashier", "stockist"].includes(newRole) || !["active", "inactive"].includes(newStatus)) {
+    return NextResponse.json({ error: "Perfil ou situação inválidos." }, { status: 400 });
+  }
 
   // Guardrail: never remove or deactivate the last active administrator!
   if (
