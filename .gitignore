@@ -1,0 +1,30 @@
+# Dependências e saída de build
+node_modules/
+.next/
+out/
+build/
+*.tsbuildinfo
+
+# Credenciais de qualquer ambiente (o exemplo sem segredos é público)
+.env*
+!.env.example
+*.pem
+*.key
+
+# Pacotes locais e backups não devem ser versionados
+exports/
+backups/
+*.dump
+*.backup
+
+# Configurações locais de provedores
+.vercel/
+.railway/
+
+# Logs, temporários e testes
+*.log
+.DS_Store
+coverage/
+test-results/
+playwright-report/
+playwright/.auth/

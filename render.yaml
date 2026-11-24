@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: mercato-homologacao
+    runtime: node
+    plan: free
+    region: virginia
+    buildCommand: npm ci --include=dev && node scripts/check-deploy.mjs && node scripts/apply-migrations.mjs && npm run build
+    startCommand: npm start -- --hostname 0.0.0.0
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        sync: false
+      - key: MIGRATION_DATABASE_URL
+        sync: false
+      - key: PLATFORM_ADMIN_EMAILS
+        sync: false
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: DEPLOYMENT_TARGET
+        value: public
+      - key: ALLOW_DEV_SEED
+        value: "false"
+      - key: ALLOW_SOURCE_EXPORT
+        value: "false"
+      - key: NEXT_PUBLIC_ENABLE_DEMO
+        value: "false"
+      - key: ALLOW_PUBLIC_REGISTRATION
+        value: "true"
