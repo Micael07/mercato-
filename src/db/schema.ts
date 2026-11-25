@@ -41,6 +41,9 @@ export const companies = pgTable(
     licenseExpiresAt: timestamp("license_expires_at", { withTimezone: true }),
     licenseNotes: text("license_notes"),
     licenseUpdatedAt: timestamp("license_updated_at", { withTimezone: true }),
+    // Limite de usuários definido pelo ADM da plataforma e quem autoriza novos: platform | company
+    maxUsers: integer("max_users").notNull().default(3),
+    userApprovalMode: varchar("user_approval_mode", { length: 20 }).notNull().default("platform"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -169,6 +172,31 @@ export const userInvites = pgTable(
     uniqueIndex("user_invites_token_uidx").on(table.token),
     index("user_invites_company_idx").on(table.companyId),
   ]
+);
+
+export const userRequests = pgTable(
+  "user_requests",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 160 }).notNull(),
+    email: varchar("email", { length: 180 }).notNull(),
+    phone: varchar("phone", { length: 30 }),
+    roleCode: varchar("role_code", { length: 40 }).notNull().default("cashier"),
+    notes: text("notes"),
+    status: varchar("status", { length: 20 }).notNull().default("pending"),
+    requestedBy: uuid("requested_by").references(() => users.id, { onDelete: "set null" }),
+    requestedByName: varchar("requested_by_name", { length: 160 }),
+    decidedBy: uuid("decided_by").references(() => users.id, { onDelete: "set null" }),
+    decidedByName: varchar("decided_by_name", { length: 160 }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionNote: text("decision_note"),
+    createdUserId: uuid("created_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("user_requests_company_idx").on(table.companyId, table.status)]
 );
 
 export const roleChangeHistory = pgTable(

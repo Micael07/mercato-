@@ -1,16 +1,15 @@
-import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { and, desc, eq } from "drizzle-orm";
 import {
   db,
   users,
   companyUsers,
-  userInvites,
   roleChangeHistory,
 } from "@/db";
 import { requireApiAuth } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import { toNumber } from "@/lib/format";
+import { getSeats } from "@/lib/team";
 
 export async function GET(req: Request) {
   const auth = await requireApiAuth(req, "users.manage");
@@ -35,13 +34,6 @@ export async function GET(req: Request) {
     .innerJoin(users, eq(companyUsers.userId, users.id))
     .where(eq(companyUsers.companyId, ctx.company.id));
 
-  const invites = await db
-    .select()
-    .from(userInvites)
-    .where(eq(userInvites.companyId, ctx.company.id))
-    .orderBy(desc(userInvites.createdAt))
-    .limit(50);
-
   const history = await db
     .select({
       id: roleChangeHistory.id,
@@ -62,63 +54,16 @@ export async function GET(req: Request) {
       ...m,
       maxDiscountPercent: toNumber(m.maxDiscountPercent),
     })),
-    invites,
+    seats: await getSeats(ctx.company.id),
     history,
   });
 }
 
-export async function POST(req: Request) {
-  const auth = await requireApiAuth(req, "users.manage");
-  if ("error" in auth) return auth.error;
-  const { ctx } = auth;
-
-  const body = await req.json();
-  const email = String(body?.email ?? "").trim().toLowerCase();
-  const name = String(body?.name ?? "").trim();
-  const roleCode = String(body?.roleCode ?? "cashier");
-
-  if (!email || !["admin", "manager", "cashier", "stockist"].includes(roleCode)) {
-    return NextResponse.json(
-      { error: "Informe e-mail e perfil válidos." },
-      { status: 400 }
-    );
-  }
-
-  const token = crypto.randomBytes(24).toString("hex");
-  const expiresAt = new Date(Date.now() + 7 * 86400 * 1000);
-
-  const [invite] = await db
-    .insert(userInvites)
-    .values({
-      companyId: ctx.company.id,
-      establishmentId: body?.establishmentId || ctx.establishment.id,
-      email,
-      name: name || null,
-      roleCode,
-      token,
-      invitedBy: ctx.user.id,
-      status: "pending",
-      expiresAt,
-    })
-    .returning();
-
-  await recordAudit({
-    companyId: ctx.company.id,
-    establishmentId: ctx.establishment.id,
-    userId: ctx.user.id,
-    userName: ctx.user.name,
-    action: "user_invited",
-    entity: "user_invite",
-    entityId: invite.id,
-    newData: { email, roleCode },
-  });
-
+/** Convite direto foi desativado: use POST /api/users/requests (solicitação com autorização). */
+export async function POST() {
   return NextResponse.json(
-    {
-      invite,
-      acceptUrl: `/accept-invite?token=${token}`,
-    },
-    { status: 201 }
+    { error: "Cadastre uma solicitação de usuário em /api/users/requests." },
+    { status: 410 }
   );
 }
 
@@ -152,6 +97,17 @@ export async function PATCH(req: Request) {
   const newStatus = body?.status ? String(body.status) : target.status;
   if (!["admin", "manager", "cashier", "stockist"].includes(newRole) || !["active", "inactive"].includes(newStatus)) {
     return NextResponse.json({ error: "Perfil ou situação inválidos." }, { status: 400 });
+  }
+
+  // Reativar também consome vaga do limite definido pelo ADM da plataforma.
+  if (target.status !== "active" && newStatus === "active") {
+    const seats = await getSeats(ctx.company.id);
+    if (seats.active >= seats.max) {
+      return NextResponse.json(
+        { error: `Limite de usuários atingido (${seats.active}/${seats.max}). Fale com o administrador da plataforma.` },
+        { status: 409 }
+      );
+    }
   }
 
   // Guardrail: never remove or deactivate the last active administrator!

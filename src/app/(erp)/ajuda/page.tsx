@@ -39,7 +39,7 @@ const GROUPS: Group[] = [
   {
     id: "usuarios", title: "Usuários e perfis", items: [
       { q: "Quais são os perfis?", a: "Administrador: acesso total. Gerente: operação, compras, financeiro e relatórios. Operador de caixa: PDV, caixa e clientes, sem custo nem financeiro. Estoquista: produtos, estoque, inventário e recebimento de compras." },
-      { q: "Como adiciono um funcionário?", a: "Sistema → Usuários → convidar. Informe o e-mail e o perfil e envie o link gerado ao funcionário (o sistema não envia e-mail). Trate o link como senha temporária." },
+      { q: "Como adiciono um funcionário?", a: "Sistema → Usuários → Solicitar usuário. Informe nome, e-mail e perfil do colaborador. A autorização é feita pelo administrador da plataforma (ou por você, se ele liberar) dentro do limite de usuários contratado. Ao autorizar, o sistema mostra uma senha provisória para entregar ao colaborador (não envia e-mail). Na mesma tela você acompanha as vendas de cada colaborador." },
       { q: "Como bloqueio um funcionário que saiu?", a: "Sistema → Usuários → desative o vínculo. O acesso é cortado na hora. A empresa sempre precisa ter ao menos um administrador ativo." },
       { q: "Esqueci minha senha.", a: "O sistema não envia e-mail de recuperação. Fale com o fornecedor do Mercato, que gera uma senha provisória para o administrador. Os demais usuários pedem ao administrador da empresa." },
     ],

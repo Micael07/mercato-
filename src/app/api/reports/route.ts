@@ -20,6 +20,7 @@ import {
 } from "@/db";
 import { requireApiAuth } from "@/lib/auth";
 import { roundMoney, toNumber } from "@/lib/format";
+import { addDaysStr, endOfDayUtc, isDateStr, startOfDayUtc, todayInTz } from "@/lib/dates";
 
 export async function GET(req: Request) {
   const auth = await requireApiAuth(req, "reports.read");
@@ -31,13 +32,15 @@ export async function GET(req: Request) {
 
   const { searchParams } = new URL(req.url);
   const type = searchParams.get("type") ?? "sales_period";
-  const from =
-    searchParams.get("from") ??
-    new Date(Date.now() - 30 * 86400 * 1000).toISOString().slice(0, 10);
-  const to = searchParams.get("to") ?? new Date().toISOString().slice(0, 10);
+  const today = todayInTz();
+  const fromParam = searchParams.get("from");
+  const toParam = searchParams.get("to");
+  const from = isDateStr(fromParam) ? fromParam : addDaysStr(today, -30);
+  const to = isDateStr(toParam) ? toParam : today;
 
-  const fromDate = new Date(`${from}T00:00:00`);
-  const toDate = new Date(`${to}T23:59:59`);
+  // Limites do período no fuso da loja (o servidor roda em UTC).
+  const fromDate = startOfDayUtc(from);
+  const toDate = endOfDayUtc(to);
 
   if (
     ["payables", "receivables", "cash_flow", "expenses_category"].includes(type) &&
@@ -45,6 +48,13 @@ export async function GET(req: Request) {
   ) {
     return NextResponse.json(
       { error: "Sem permissão para relatórios financeiros." },
+      { status: 403 }
+    );
+  }
+
+  if (type === "income_statement" && !(canFinance && canViewCost)) {
+    return NextResponse.json(
+      { error: "O resultado do período exige permissão financeira e de custos." },
       { status: 403 }
     );
   }
@@ -354,7 +364,15 @@ export async function GET(req: Request) {
           )
         )
         .orderBy(desc(inventories.openedAt));
-      return NextResponse.json({ rows: invs });
+      return NextResponse.json({
+        rows: invs.map((i) => ({
+          code: i.code,
+          description: i.description,
+          status: i.status,
+          openedAt: i.openedAt,
+          closedAt: i.closedAt,
+        })),
+      });
     }
 
     case "purchases_supplier":
@@ -454,6 +472,77 @@ export async function GET(req: Request) {
           amount: toNumber(e.amount),
           paidAmount: toNumber(e.paidAmount),
         })),
+      });
+    }
+
+    case "income_statement": {
+      const saleRows = estSales;
+      const gross = roundMoney(saleRows.reduce((a, s) => a + toNumber(s.subtotal), 0));
+      const discounts = roundMoney(saleRows.reduce((a, s) => a + toNumber(s.discountTotal), 0));
+      const net = roundMoney(saleRows.reduce((a, s) => a + toNumber(s.total), 0));
+
+      const itemRows =
+        estSaleIds.length > 0
+          ? await db
+              .select({ quantity: saleItems.quantity, cost: saleItems.costPriceSnapshot })
+              .from(saleItems)
+              .where(inArray(saleItems.saleId, estSaleIds))
+          : [];
+      const cmv = roundMoney(
+        itemRows.reduce((a, i) => a + toNumber(i.quantity) * toNumber(i.cost), 0)
+      );
+      const grossProfit = roundMoney(net - cmv);
+
+      // Despesas: contas a pagar do período, sem as geradas por compra de mercadoria
+      // (a mercadoria já entra como custo da venda).
+      const expenseRows = await db
+        .select({
+          amount: financialEntries.amount,
+          category: financialCategories.name,
+          origin: financialEntries.originType,
+          status: financialEntries.status,
+        })
+        .from(financialEntries)
+        .leftJoin(financialCategories, eq(financialEntries.categoryId, financialCategories.id))
+        .where(
+          and(
+            eq(financialEntries.companyId, ctx.company.id),
+            eq(financialEntries.establishmentId, ctx.establishment.id),
+            eq(financialEntries.type, "payable"),
+            gte(financialEntries.dueDate, from),
+            lte(financialEntries.dueDate, to)
+          )
+        );
+      const byCat = new Map<string, number>();
+      for (const e of expenseRows) {
+        if (e.origin === "purchase" || e.status === "cancelled") continue;
+        const c = e.category || "Sem categoria";
+        byCat.set(c, roundMoney((byCat.get(c) ?? 0) + toNumber(e.amount)));
+      }
+      const cats = Array.from(byCat.entries())
+        .filter(([, v]) => v > 0)
+        .sort((a, b) => b[1] - a[1]);
+      const expenses = roundMoney(cats.reduce((a, [, v]) => a + v, 0));
+      const result = roundMoney(grossProfit - expenses);
+
+      const pct = (v: number) => (net > 0 ? roundMoney((v / net) * 100) : 0);
+      const line = (description: string, amount: number, bold = false, indent = false) => ({
+        description: indent ? `   ${description}` : description,
+        amount,
+        percent: pct(amount),
+        _bold: bold,
+      });
+      return NextResponse.json({
+        rows: [
+          line("Receita bruta de vendas", gross),
+          line("(–) Descontos concedidos", -discounts),
+          line("Receita líquida", net, true),
+          line("(–) Custo das mercadorias vendidas", -cmv),
+          line("Lucro bruto", grossProfit, true),
+          ...cats.map(([c, v]) => line(c, -v, false, true)),
+          line("(–) Despesas do período", -expenses),
+          line("Resultado do período", result, true),
+        ],
       });
     }
 

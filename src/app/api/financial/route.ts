@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lt, lte } from "drizzle-orm";
 import {
   db,
   financialEntries,
@@ -11,6 +11,7 @@ import {
 import { requireApiAuth } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import { roundMoney, toNumber } from "@/lib/format";
+import { addDaysStr, todayInTz } from "@/lib/dates";
 
 export async function GET(req: Request) {
   const auth = await requireApiAuth(req, "finance.read");
@@ -28,7 +29,13 @@ export async function GET(req: Request) {
     eq(financialEntries.establishmentId, ctx.establishment.id),
   ];
   if (type && type !== "all") conds.push(eq(financialEntries.type, type));
-  if (status && status !== "all") conds.push(eq(financialEntries.status, status));
+  const today = todayInTz();
+  if (status === "overdue") {
+    conds.push(inArray(financialEntries.status, ["open", "partial"]));
+    conds.push(lt(financialEntries.dueDate, today));
+  } else if (status && status !== "all") {
+    conds.push(eq(financialEntries.status, status));
+  }
   if (from) conds.push(gte(financialEntries.dueDate, from));
   if (to) conds.push(lte(financialEntries.dueDate, to));
 
@@ -77,7 +84,6 @@ export async function GET(req: Request) {
     .orderBy(desc(financialSettlements.settledAt))
     .limit(100);
 
-  const today = new Date().toISOString().slice(0, 10);
   const formatted = rows.map((r) => {
     const isOverdue =
       (r.status === "open" || r.status === "partial") && r.dueDate < today;
@@ -94,6 +100,55 @@ export async function GET(req: Request) {
       ),
     };
   });
+
+  // Posição em aberto da loja (independe dos filtros da tela)
+  const openRows = await db
+    .select({
+      type: financialEntries.type,
+      dueDate: financialEntries.dueDate,
+      amount: financialEntries.amount,
+      paidAmount: financialEntries.paidAmount,
+    })
+    .from(financialEntries)
+    .where(
+      and(
+        eq(financialEntries.companyId, ctx.company.id),
+        eq(financialEntries.establishmentId, ctx.establishment.id),
+        inArray(financialEntries.status, ["open", "partial"])
+      )
+    );
+  const soonLimit = addDaysStr(today, 7);
+  const position = {
+    payableOpen: 0,
+    receivableOpen: 0,
+    overdueOut: 0,
+    overdueOutCount: 0,
+    overdueIn: 0,
+    overdueInCount: 0,
+    dueSoonOut: 0,
+    dueSoonIn: 0,
+  };
+  for (const r of openRows) {
+    const rem = Math.max(0, toNumber(r.amount) - toNumber(r.paidAmount));
+    const out = r.type === "payable";
+    if (out) position.payableOpen += rem;
+    else position.receivableOpen += rem;
+    if (r.dueDate < today) {
+      if (out) {
+        position.overdueOut += rem;
+        position.overdueOutCount += 1;
+      } else {
+        position.overdueIn += rem;
+        position.overdueInCount += 1;
+      }
+    } else if (r.dueDate <= soonLimit) {
+      if (out) position.dueSoonOut += rem;
+      else position.dueSoonIn += rem;
+    }
+  }
+  for (const k of Object.keys(position) as Array<keyof typeof position>) {
+    if (!k.endsWith("Count")) position[k] = roundMoney(position[k]);
+  }
 
   // Cash flow summary
   const realizedIn = formatted
@@ -123,6 +178,7 @@ export async function GET(req: Request) {
       projectedIn,
       projectedOut,
       projectedBalance: roundMoney(realizedIn - realizedOut + projectedIn - projectedOut),
+      position,
     },
   });
 }
@@ -155,8 +211,8 @@ export async function POST(req: Request) {
   const description = String(body?.description ?? "").trim();
   const type = body?.type === "receivable" ? "receivable" : "payable";
   const amount = toNumber(body?.amount ?? 0);
-  const dueDate = String(body?.dueDate ?? new Date().toISOString().slice(0, 10));
-  const issueDate = String(body?.issueDate ?? new Date().toISOString().slice(0, 10));
+  const dueDate = String(body?.dueDate ?? todayInTz());
+  const issueDate = String(body?.issueDate ?? todayInTz());
   const competenceDate = String(body?.competenceDate ?? issueDate);
 
   if (!description || amount <= 0) {

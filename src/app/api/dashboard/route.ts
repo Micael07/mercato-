@@ -15,6 +15,7 @@ import {
 } from "@/db";
 import { requireApiAuth } from "@/lib/auth";
 import { roundMoney, toNumber } from "@/lib/format";
+import { dateInTz, startOfDayUtc, todayInTz } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,7 @@ export async function GET(req: Request) {
   const days = Math.min(90, Math.max(1, Number(searchParams.get("days") ?? 30)));
 
   const now = new Date();
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfDay = startOfDayUtc(todayInTz());
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const periodStart = new Date(now.getTime() - days * 86400 * 1000);
   const prevPeriodStart = new Date(periodStart.getTime() - days * 86400 * 1000);
@@ -115,10 +116,10 @@ export async function GET(req: Request) {
   const byDayMap = new Map<string, number>();
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(now.getTime() - i * 86400 * 1000);
-    byDayMap.set(d.toISOString().slice(0, 10), 0);
+    byDayMap.set(dateInTz(d), 0);
   }
   for (const s of currentSales) {
-    const key = s.createdAt.toISOString().slice(0, 10);
+    const key = dateInTz(s.createdAt);
     if (byDayMap.has(key)) {
       byDayMap.set(key, roundMoney((byDayMap.get(key) ?? 0) + toNumber(s.total)));
     }
@@ -296,8 +297,8 @@ export async function GET(req: Request) {
         .reduce((a, e) => a + (toNumber(e.amount) - toNumber(e.paidAmount)), 0)
     );
 
-    const periodStartStr = periodStart.toISOString().slice(0, 10);
-    const nowStr = now.toISOString().slice(0, 10);
+    const periodStartStr = dateInTz(periodStart);
+    const nowStr = dateInTz(now);
     expensesPeriod = roundMoney(
       entries
         .filter(

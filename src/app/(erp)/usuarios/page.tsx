@@ -1,10 +1,10 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
-import { MailPlus, ShieldAlert, UserCheck, UserX } from "lucide-react";
+import { Copy, ShieldAlert, UserCheck, UserPlus, UserX } from "lucide-react";
 import { useSession } from "@/components/session-provider";
 import { useToast } from "@/components/ui/toast";
-import { formatDateTime } from "@/lib/format";
+import { formatCurrency, formatDateTime } from "@/lib/format";
 import { ROLE_DEFINITIONS } from "@/lib/permissions";
 import {
   Badge,
@@ -28,21 +28,45 @@ interface MemberRow {
   lastLoginAt: string | null;
 }
 
+interface UserRequest {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  roleCode: string;
+  status: string;
+  requestedByName: string | null;
+  decidedByName: string | null;
+  createdAt: string;
+}
+interface Seats {
+  max: number;
+  mode: "platform" | "company";
+  active: number;
+  pending: number;
+  free: number;
+}
+interface TeamSale {
+  userId: string;
+  name: string;
+  roleCode: string;
+  status: string;
+  salesCount: number;
+  total: number;
+  avgTicket: number;
+  lastSaleAt: string | null;
+}
+
 export default function UsuariosPage() {
   const { session } = useSession();
   const { toast } = useToast();
 
   const [members, setMembers] = useState<MemberRow[]>([]);
-  const [invites, setInvites] = useState<
-    Array<{
-      id: string;
-      email: string;
-      roleCode: string;
-      status: string;
-      token: string;
-      expiresAt: string;
-    }>
-  >([]);
+  const [requests, setRequests] = useState<UserRequest[]>([]);
+  const [seats, setSeats] = useState<Seats | null>(null);
+  const [teamSales, setTeamSales] = useState<TeamSale[]>([]);
+  const [range, setRange] = useState(30);
+  const [secret, setSecret] = useState<{ email: string; password: string } | null>(null);
   const [history, setHistory] = useState<
     Array<{
       id: string;
@@ -59,27 +83,38 @@ export default function UsuariosPage() {
   const [inviteForm, setInviteForm] = useState({
     name: "",
     email: "",
+    phone: "",
+    notes: "",
     roleCode: "cashier",
   });
-  const [createdInviteLink, setCreatedInviteLink] = useState<string | null>(
-    null
-  );
   const [submitting, setSubmitting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/users");
+      const to = new Date();
+      const from = new Date(to.getTime() - (range - 1) * 86400000);
+      const iso = (d: Date) => d.toISOString().slice(0, 10);
+      const [res, rres, tres] = await Promise.all([
+        fetch("/api/users"),
+        fetch("/api/users/requests"),
+        fetch(`/api/team/sales?from=${iso(from)}&to=${iso(to)}`),
+      ]);
       if (res.ok) {
         const data = await res.json();
         setMembers(data.members ?? []);
-        setInvites(data.invites ?? []);
         setHistory(data.history ?? []);
       }
+      if (rres.ok) {
+        const data = await rres.json();
+        setRequests(data.requests ?? []);
+        setSeats(data.seats ?? null);
+      }
+      if (tres.ok) setTeamSales((await tres.json()).rows ?? []);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [range]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -88,11 +123,11 @@ export default function UsuariosPage() {
     return () => clearTimeout(t);
   }, [load, session?.company.id]);
 
-  const handleInvite = async (e: React.FormEvent) => {
+  const handleRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     try {
-      const res = await fetch("/api/users", {
+      const res = await fetch("/api/users/requests", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(inviteForm),
@@ -102,12 +137,36 @@ export default function UsuariosPage() {
         toast({ type: "error", title: data.error });
         return;
       }
-      setCreatedInviteLink(data.acceptUrl);
+      setInviteModal(false);
       toast({
         type: "success",
-        title: "Convite gerado!",
-        description: "Compartilhe o link seguro ou configure SMTP.",
+        title: "Solicitação enviada",
+        description:
+          seats?.mode === "company"
+            ? "Você pode autorizar agora na lista abaixo."
+            : "Aguarde a autorização do administrador da plataforma.",
       });
+      load();
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const decide = async (id: string, action: "approve" | "reject" | "cancel") => {
+    setSubmitting(true);
+    try {
+      const res = await fetch(`/api/users/requests/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast({ type: "error", title: data.error });
+        return;
+      }
+      if (action === "approve") setSecret({ email: data.email, password: data.tempPassword });
+      else toast({ type: "success", title: "Solicitação atualizada" });
       load();
     } finally {
       setSubmitting(false);
@@ -222,21 +281,38 @@ export default function UsuariosPage() {
             Usuários da Empresa
           </h1>
           <p className="text-xs text-slate-500">
-            Convites por e-mail, definição de perfis e proteção ao último
-            administrador
+            Solicite novos acessos, acompanhe o limite contratado e veja as
+            vendas de cada colaborador
           </p>
         </div>
         <Button
+          disabled={!!seats && seats.active + seats.pending >= seats.max}
           onClick={() => {
-            setCreatedInviteLink(null);
-            setInviteForm({ name: "", email: "", roleCode: "cashier" });
+            setInviteForm({ name: "", email: "", phone: "", notes: "", roleCode: "cashier" });
             setInviteModal(true);
           }}
         >
-          <MailPlus className="h-4 w-4" />
-          Convidar Usuário
+          <UserPlus className="h-4 w-4" />
+          Solicitar usuário
         </Button>
       </div>
+
+      {seats && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border border-slate-200 bg-white px-4 py-3 text-xs">
+          <p className="text-slate-700">
+            <span className="font-mono text-base font-bold">{seats.active}/{seats.max}</span>{" "}
+            usuários ativos
+            {seats.pending > 0 && <> · {seats.pending} solicitação(ões) pendente(s)</>}
+          </p>
+          <p className="text-slate-500">
+            {seats.active + seats.pending >= seats.max
+              ? "Limite atingido. Para liberar mais acessos, fale com o administrador da plataforma."
+              : seats.mode === "company"
+                ? "Você pode autorizar novos usuários até o limite."
+                : "Novos usuários são autorizados pelo administrador da plataforma."}
+          </p>
+        </div>
+      )}
 
       <DataTable
         data={members}
@@ -246,30 +322,40 @@ export default function UsuariosPage() {
       />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Panel title="Convites enviados" noPadding>
-          {invites.length === 0 ? (
-            <p className="p-4 text-xs text-slate-400">Nenhum convite pendente.</p>
+        <Panel title="Solicitações de usuário" noPadding>
+          {requests.length === 0 ? (
+            <p className="p-4 text-xs text-slate-400">Nenhuma solicitação.</p>
           ) : (
             <ul className="divide-y divide-slate-100 text-xs">
-              {invites.map((inv) => (
-                <li
-                  key={inv.id}
-                  className="flex items-center justify-between p-3"
-                >
-                  <div>
-                    <p className="font-semibold text-slate-900">{inv.email}</p>
-                    <p className="text-slate-500">
-                      Perfil: {inv.roleCode} ·{" "}
-                      <code className="text-[10px]">
-                        /accept-invite?token={inv.token}
-                      </code>
-                    </p>
+              {requests.map((q) => (
+                <li key={q.id} className="space-y-2 p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-slate-900">{q.name}</p>
+                      <p className="text-slate-500">
+                        {q.email} · {ROLE_DEFINITIONS[q.roleCode as keyof typeof ROLE_DEFINITIONS]?.name ?? q.roleCode}
+                      </p>
+                      <p className="text-[10px] text-slate-400">
+                        {formatDateTime(q.createdAt)}
+                        {q.decidedByName ? ` · decidido por ${q.decidedByName}` : ""}
+                      </p>
+                    </div>
+                    <Badge tone={q.status === "approved" ? "success" : q.status === "pending" ? "warning" : "neutral"}>
+                      {q.status === "pending" ? "Aguardando" : q.status === "approved" ? "Autorizado" : q.status === "rejected" ? "Recusado" : "Cancelado"}
+                    </Badge>
                   </div>
-                  <Badge
-                    tone={inv.status === "accepted" ? "success" : "warning"}
-                  >
-                    {inv.status}
-                  </Badge>
+                  {q.status === "pending" && (
+                    <div className="flex gap-2">
+                      {seats?.mode === "company" && (
+                        <Button size="sm" disabled={submitting} onClick={() => decide(q.id, "approve")}>
+                          Autorizar
+                        </Button>
+                      )}
+                      <Button size="sm" variant="ghost" disabled={submitting} onClick={() => decide(q.id, "cancel")}>
+                        Cancelar
+                      </Button>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
@@ -298,70 +384,105 @@ export default function UsuariosPage() {
         </Panel>
       </div>
 
+      <Panel
+        title="Vendas por colaborador"
+        noPadding
+        actions={
+          <Select aria-label="Período" value={range} onChange={(e) => setRange(Number(e.target.value))} className="h-8 w-36 text-xs">
+            <option value={7}>Últimos 7 dias</option>
+            <option value={30}>Últimos 30 dias</option>
+            <option value={90}>Últimos 90 dias</option>
+          </Select>
+        }
+      >
+        {teamSales.length === 0 ? (
+          <p className="p-4 text-xs text-slate-400">Sem dados no período.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-slate-50 text-left text-[11px] text-slate-500">
+                <tr>
+                  <th className="p-2.5">Colaborador</th>
+                  <th className="p-2.5 text-right">Vendas</th>
+                  <th className="p-2.5 text-right">Total</th>
+                  <th className="p-2.5 text-right">Ticket médio</th>
+                  <th className="p-2.5">Última venda</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {teamSales.map((t) => (
+                  <tr key={t.userId}>
+                    <td className="p-2.5 font-semibold text-slate-800">
+                      {t.name}
+                      <span className="ml-1 font-normal text-slate-400">{ROLE_DEFINITIONS[t.roleCode as keyof typeof ROLE_DEFINITIONS]?.name ?? t.roleCode}{t.status !== "active" ? " · inativo" : ""}</span>
+                    </td>
+                    <td className="p-2.5 text-right font-mono">{t.salesCount}</td>
+                    <td className="p-2.5 text-right font-mono font-semibold">{formatCurrency(t.total)}</td>
+                    <td className="p-2.5 text-right font-mono">{formatCurrency(t.avgTicket)}</td>
+                    <td className="p-2.5 text-slate-500">{t.lastSaleAt ? formatDateTime(t.lastSaleAt) : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
+
+      <Modal open={!!secret} onClose={() => setSecret(null)} title="Usuário autorizado" size="sm">
+        {secret && (
+          <div className="space-y-3 text-xs">
+            <p className="text-slate-600">Entregue estes dados ao colaborador. A senha provisória só aparece agora.</p>
+            <div className="space-y-1 border border-emerald-200 bg-emerald-50 p-3">
+              <p>E-mail: <strong>{secret.email}</strong></p>
+              <p>Senha provisória: <code className="font-mono text-sm font-bold">{secret.password}</code></p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => void navigator.clipboard?.writeText(`E-mail: ${secret.email}\nSenha: ${secret.password}`)}>
+                <Copy className="h-3.5 w-3.5" /> Copiar
+              </Button>
+              <Button onClick={() => setSecret(null)}>Fechar</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       <Modal
         open={inviteModal}
         onClose={() => setInviteModal(false)}
-        title="Convidar Novo Usuário"
+        title="Solicitar novo usuário"
         size="sm"
       >
-        <form onSubmit={handleInvite} className="space-y-3">
-          <Field label="Nome">
-            <Input
-              value={inviteForm.name}
-              onChange={(e) =>
-                setInviteForm({ ...inviteForm, name: e.target.value })
-              }
-            />
+        <form onSubmit={handleRequest} className="space-y-3">
+          <Field label="Nome completo" required>
+            <Input required value={inviteForm.name} onChange={(e) => setInviteForm({ ...inviteForm, name: e.target.value })} />
           </Field>
-          <Field label="E-mail corporativo" required>
-            <Input
-              type="email"
-              required
-              value={inviteForm.email}
-              onChange={(e) =>
-                setInviteForm({ ...inviteForm, email: e.target.value })
-              }
-            />
+          <Field label="E-mail (será o login)" required>
+            <Input type="email" required value={inviteForm.email} onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })} />
           </Field>
-          <Field label="Perfil inicial">
-            <Select
-              value={inviteForm.roleCode}
-              onChange={(e) =>
-                setInviteForm({ ...inviteForm, roleCode: e.target.value })
-              }
-            >
+          <Field label="Telefone">
+            <Input value={inviteForm.phone} onChange={(e) => setInviteForm({ ...inviteForm, phone: e.target.value })} />
+          </Field>
+          <Field label="Perfil">
+            <Select value={inviteForm.roleCode} onChange={(e) => setInviteForm({ ...inviteForm, roleCode: e.target.value })}>
               {Object.entries(ROLE_DEFINITIONS).map(([code, def]) => (
-                <option key={code} value={code}>
-                  {def.name}
-                </option>
+                <option key={code} value={code}>{def.name}</option>
               ))}
             </Select>
           </Field>
-
-          {createdInviteLink && (
-            <div className="rounded border border-emerald-200 bg-emerald-50 p-2.5 text-xs text-emerald-900">
-              <p className="font-semibold">Link de aceite gerado:</p>
-              <code className="mt-1 block break-all text-[11px]">
-                {createdInviteLink}
-              </code>
-            </div>
-          )}
-
+          <Field label="Observação">
+            <Input value={inviteForm.notes} onChange={(e) => setInviteForm({ ...inviteForm, notes: e.target.value })} placeholder="Ex.: caixa do turno da manhã" />
+          </Field>
           <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
             <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
             <span>
-              Caso o provedor SMTP/Resend não esteja configurado, copie o link
-              gerado para envio manual.
+              {seats?.mode === "company"
+                ? "Depois de enviar, você mesmo autoriza na lista de solicitações."
+                : "O acesso só é criado depois da autorização do administrador da plataforma."}
             </span>
           </div>
-
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={() => setInviteModal(false)}>
-              Fechar
-            </Button>
-            <Button type="submit" loading={submitting}>
-              Gerar Convite
-            </Button>
+            <Button variant="outline" onClick={() => setInviteModal(false)}>Fechar</Button>
+            <Button type="submit" loading={submitting}>Enviar solicitação</Button>
           </div>
         </form>
       </Modal>

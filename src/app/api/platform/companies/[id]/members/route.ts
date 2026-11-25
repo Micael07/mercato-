@@ -4,6 +4,7 @@ import { db, companyUsers, roleChangeHistory, users } from "@/db";
 import { requirePlatformAdmin } from "@/lib/auth";
 import { extractRequestMeta, recordAudit } from "@/lib/audit";
 import { isUuid } from "@/lib/security";
+import { getSeats } from "@/lib/team";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +36,7 @@ export async function GET(
     .where(eq(companyUsers.companyId, id))
     .orderBy(asc(companyUsers.createdAt));
 
-  return NextResponse.json({ members });
+  return NextResponse.json({ members, seats: await getSeats(id) });
 }
 
 /**
@@ -78,6 +79,16 @@ export async function PATCH(
 
   const newRole = (body.roleCode as string | undefined) ?? target.roleCode;
   const newStatus = (body.status as string | undefined) ?? target.status;
+
+  if (target.status !== "active" && newStatus === "active") {
+    const seats = await getSeats(id);
+    if (seats.active >= seats.max) {
+      return NextResponse.json(
+        { error: `Limite de usuários atingido (${seats.active}/${seats.max}). Aumente o limite da empresa antes de reativar.` },
+        { status: 409 }
+      );
+    }
+  }
 
   // A empresa precisa manter ao menos um administrador ativo.
   if (

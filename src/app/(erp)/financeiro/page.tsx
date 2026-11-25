@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
-import { CheckCircle2, Download, Plus, RotateCcw } from "lucide-react";
+import { CheckCircle2, Download, FileText, Plus, RotateCcw, Search } from "lucide-react";
+import Link from "next/link";
 import { useSession } from "@/components/session-provider";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -38,6 +39,12 @@ interface FinancialEntryRow {
   categoryName: string | null;
 }
 
+const localToday = () => {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+
 const FIN_STATUS: Record<string, { label: string; tone: BadgeTone }> = {
   open: { label: "Em aberto", tone: "info" },
   partial: { label: "Parcial", tone: "warning" },
@@ -73,15 +80,28 @@ export default function FinanceiroPage() {
     projectedIn: 0,
     projectedOut: 0,
     projectedBalance: 0,
+    position: {
+      payableOpen: 0,
+      receivableOpen: 0,
+      overdueOut: 0,
+      overdueOutCount: 0,
+      overdueIn: 0,
+      overdueInCount: 0,
+      dueSoonOut: 0,
+      dueSoonIn: 0,
+    },
   });
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [dueFrom, setDueFrom] = useState("");
+  const [dueTo, setDueTo] = useState("");
 
   const [createModal, setCreateModal] = useState(false);
   const [entryForm, setEntryForm] = useState({
     type: "payable",
     description: "",
     amount: "",
-    dueDate: new Date().toISOString().slice(0, 10),
+    dueDate: localToday(),
     categoryId: "",
     recurrence: "none",
   });
@@ -105,6 +125,8 @@ export default function FinanceiroPage() {
       const qs = new URLSearchParams();
       if (tab === "payable" || tab === "receivable") qs.set("type", tab);
       if (statusFilter !== "all") qs.set("status", statusFilter);
+      if (dueFrom) qs.set("from", dueFrom);
+      if (dueTo) qs.set("to", dueTo);
       const res = await fetch(`/api/financial?${qs.toString()}`);
       if (res.ok) {
         const data = await res.json();
@@ -116,7 +138,7 @@ export default function FinanceiroPage() {
     } finally {
       setLoading(false);
     }
-  }, [tab, statusFilter]);
+  }, [tab, statusFilter, dueFrom, dueTo]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -148,7 +170,7 @@ export default function FinanceiroPage() {
         type: "payable",
         description: "",
         amount: "",
-        dueDate: new Date().toISOString().slice(0, 10),
+        dueDate: localToday(),
         categoryId: "",
         recurrence: "none",
       });
@@ -216,6 +238,20 @@ export default function FinanceiroPage() {
       load();
     }
   };
+
+  const q = search.trim().toLowerCase();
+  const visibleItems = q
+    ? items.filter((i) =>
+        [i.description, i.supplierName, i.customerName, i.categoryName]
+          .filter(Boolean)
+          .some((s) => String(s).toLowerCase().includes(q))
+      )
+    : items;
+  const listTotal = visibleItems.reduce((s, i) => s + i.amount, 0);
+  const listRemaining = visibleItems
+    .filter((i) => i.status !== "cancelled")
+    .reduce((s, i) => s + i.remainingAmount, 0);
+  const pos = summary.position;
 
   const columns: ColumnDef<FinancialEntryRow>[] = [
     {
@@ -317,19 +353,25 @@ export default function FinanceiroPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Link href="/relatorios?type=income_statement" className="erp-button erp-button--outline erp-button--md">
+            <FileText className="h-4 w-4" />
+            Relatórios financeiros
+          </Link>
           <Button
             variant="outline"
             onClick={() =>
               downloadCsv(
                 "financeiro-mercato",
-                ["Vencimento", "Tipo", "Descrição", "Valor", "Pago", "Status"],
-                items.map((i) => [
-                  i.dueDate,
-                  i.type === "receivable" ? "Receber" : "Pagar",
+                ["Vencimento", "Tipo", "Descrição", "Pessoa / Categoria", "Valor", "Pago", "Saldo", "Situação"],
+                visibleItems.map((i) => [
+                  formatDate(i.dueDate),
+                  i.type === "receivable" ? "A receber" : "A pagar",
                   i.description,
-                  i.amount,
-                  i.paidAmount,
-                  i.effectiveStatus,
+                  i.supplierName || i.customerName || i.categoryName || "Manual",
+                  i.amount.toFixed(2),
+                  i.paidAmount.toFixed(2),
+                  i.remainingAmount.toFixed(2),
+                  FIN_STATUS[i.effectiveStatus]?.label ?? i.effectiveStatus,
                 ])
               )
             }
@@ -344,6 +386,37 @@ export default function FinanceiroPage() {
             </Button>
           )}
         </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="rounded border border-slate-200 bg-white px-4 py-3">
+          <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">A pagar em aberto</p>
+          <p className="mt-1 font-mono text-lg font-bold text-slate-900">{formatCurrency(pos.payableOpen)}</p>
+          <p className="text-[11px] text-slate-500">vencem em 7 dias: {formatCurrency(pos.dueSoonOut)}</p>
+        </div>
+        <div className="rounded border border-slate-200 bg-white px-4 py-3">
+          <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">A receber em aberto</p>
+          <p className="mt-1 font-mono text-lg font-bold text-slate-900">{formatCurrency(pos.receivableOpen)}</p>
+          <p className="text-[11px] text-slate-500">vencem em 7 dias: {formatCurrency(pos.dueSoonIn)}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => { setTab("payable"); setStatusFilter("overdue"); }}
+          className={`rounded border px-4 py-3 text-left ${pos.overdueOutCount > 0 ? "border-red-200 bg-red-50" : "border-slate-200 bg-white"}`}
+        >
+          <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">Contas a pagar vencidas</p>
+          <p className={`mt-1 font-mono text-lg font-bold ${pos.overdueOutCount > 0 ? "text-red-700" : "text-slate-900"}`}>{formatCurrency(pos.overdueOut)}</p>
+          <p className="text-[11px] text-slate-500">{pos.overdueOutCount} {pos.overdueOutCount === 1 ? "título" : "títulos"}</p>
+        </button>
+        <button
+          type="button"
+          onClick={() => { setTab("receivable"); setStatusFilter("overdue"); }}
+          className={`rounded border px-4 py-3 text-left ${pos.overdueInCount > 0 ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-white"}`}
+        >
+          <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">Recebimentos em atraso</p>
+          <p className={`mt-1 font-mono text-lg font-bold ${pos.overdueInCount > 0 ? "text-amber-800" : "text-slate-900"}`}>{formatCurrency(pos.overdueIn)}</p>
+          <p className="text-[11px] text-slate-500">{pos.overdueInCount} {pos.overdueInCount === 1 ? "título" : "títulos"}</p>
+        </button>
       </div>
 
       {/* Tabs */}
@@ -493,22 +566,44 @@ export default function FinanceiroPage() {
         </div>
       ) : (
         <DataTable
-          data={items}
+          data={visibleItems}
           columns={columns}
           rowKey={(r) => r.id}
           loading={loading}
           toolbar={
-            <Select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="h-8 w-44 text-xs"
-            >
-              <option value="all">Todas as situações</option>
-              <option value="open">Em aberto</option>
-              <option value="partial">Parcial</option>
-              <option value="paid">Quitado</option>
-              <option value="cancelled">Cancelado</option>
-            </Select>
+            <>
+              <div className="relative">
+                <Search className="pointer-events-none absolute top-2 left-2.5 h-3.5 w-3.5 text-slate-400" />
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Buscar descrição, fornecedor ou cliente..."
+                  className="h-8 w-64 pl-8 text-xs"
+                />
+              </div>
+              <Select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="h-8 w-44 text-xs"
+              >
+                <option value="all">Todas as situações</option>
+                <option value="open">Em aberto</option>
+                <option value="overdue">Vencidos</option>
+                <option value="partial">Parcial</option>
+                <option value="paid">Quitado</option>
+                <option value="cancelled">Cancelado</option>
+              </Select>
+              <Input type="date" aria-label="Vencimento de" value={dueFrom} max={dueTo || undefined} onChange={(e) => setDueFrom(e.target.value)} className="h-8 w-36 text-xs" />
+              <Input type="date" aria-label="Vencimento até" value={dueTo} min={dueFrom || undefined} onChange={(e) => setDueTo(e.target.value)} className="h-8 w-36 text-xs" />
+              {(dueFrom || dueTo || search || statusFilter !== "all") && (
+                <Button size="sm" variant="ghost" onClick={() => { setSearch(""); setDueFrom(""); setDueTo(""); setStatusFilter("all"); }}>
+                  Limpar filtros
+                </Button>
+              )}
+              <span className="ml-auto text-[11px] text-slate-500">
+                {visibleItems.length} títulos · valor {formatCurrency(listTotal)} · saldo {formatCurrency(listRemaining)}
+              </span>
+            </>
           }
         />
       )}

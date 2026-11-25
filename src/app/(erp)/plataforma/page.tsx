@@ -93,6 +93,10 @@ function endOfDayIso(date: string) {
   return new Date(y, m - 1, d, 23, 59, 59).toISOString();
 }
 
+interface UserRequest { id: string; name: string; email: string; phone: string | null; roleCode: string; notes: string | null; status: string; requestedByName: string | null; decidedByName: string | null; createdAt: string; }
+interface TeamSale { userId: string; name: string; roleCode: string; status: string; salesCount: number; total: number; avgTicket: number; lastSaleAt: string | null; }
+const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
 export default function PlataformaPage() {
   const { session } = useSession();
   const { toast } = useToast();
@@ -105,6 +109,11 @@ export default function PlataformaPage() {
   const [events, setEvents] = useState<LicenseEvent[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [busy, setBusy] = useState(false);
+  const [seats, setSeats] = useState<{ max: number; mode: "platform" | "company"; active: number; pending: number } | null>(null);
+  const [maxUsersInput, setMaxUsersInput] = useState("");
+  const [reqs, setReqs] = useState<UserRequest[]>([]);
+  const [teamSales, setTeamSales] = useState<TeamSale[]>([]);
+  const [queue, setQueue] = useState<Array<UserRequest & { companyId: string; companyName: string }>>([]);
   const [plan, setPlan] = useState("");
   const [notes, setNotes] = useState("");
   const [payNote, setPayNote] = useState("");
@@ -124,17 +133,56 @@ export default function PlataformaPage() {
     } catch { setError("Falha de conexão."); }
     finally { setLoading(false); }
   }, []);
-  useEffect(() => { const t = setTimeout(() => void load(), 0); return () => clearTimeout(t); }, [load]);
+  const loadQueue = useCallback(async () => {
+    try {
+      const res = await fetch("/api/platform/requests", { cache: "no-store" });
+      if (res.ok) setQueue((await res.json()).requests ?? []);
+    } catch { /* fila é informativa */ }
+  }, []);
+  useEffect(() => { const t = setTimeout(() => { void load(); void loadQueue(); }, 0); return () => clearTimeout(t); }, [load, loadQueue]);
+
+  async function loadTeam(companyId: string) {
+    const [m, r, t] = await Promise.all([
+      fetch(`/api/platform/companies/${companyId}/members`, { cache: "no-store" }),
+      fetch(`/api/platform/companies/${companyId}/requests`, { cache: "no-store" }),
+      fetch(`/api/platform/companies/${companyId}/team-sales`, { cache: "no-store" }),
+    ]);
+    if (m.ok) { const d = await m.json(); setMembers(d.members ?? []); if (d.seats) { setSeats(d.seats); setMaxUsersInput(String(d.seats.max)); } }
+    if (r.ok) setReqs((await r.json()).requests ?? []);
+    if (t.ok) setTeamSales((await t.json()).rows ?? []);
+  }
+
+  async function savePolicy(change: { maxUsers?: number; mode?: string }) {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/platform/companies/${selected.id}/user-policy`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(change) });
+      const data = await res.json();
+      if (!res.ok) { toast({ type: "error", title: data.error || "Não foi possível salvar." }); return; }
+      toast({ type: "success", title: "Regras de usuários atualizadas" });
+      await loadTeam(selected.id);
+    } finally { setBusy(false); }
+  }
+
+  async function decideRequest(companyId: string, requestId: string, action: "approve" | "reject") {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/platform/companies/${companyId}/requests`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requestId, action }) });
+      const data = await res.json();
+      if (!res.ok) { toast({ type: "error", title: data.error || "Não foi possível decidir." }); return; }
+      if (action === "approve") setSecret({ title: "Usuário autorizado", email: data.email, password: data.tempPassword });
+      else toast({ type: "success", title: "Solicitação recusada" });
+      await loadQueue(); await load();
+      if (selectedId === companyId) await loadTeam(companyId);
+    } finally { setBusy(false); }
+  }
 
   async function open(row: ClientRow) {
     setSelectedId(row.id); setPlan(row.licensePlan ?? ""); setNotes(row.licenseNotes ?? "");
-    setExpiry(toDateInput(row.licenseExpiresAt)); setPayNote(""); setEvents([]); setMembers([]);
-    const [res, mres] = await Promise.all([
-      fetch(`/api/platform/companies/${row.id}`, { cache: "no-store" }),
-      fetch(`/api/platform/companies/${row.id}/members`, { cache: "no-store" }),
-    ]);
+    setExpiry(toDateInput(row.licenseExpiresAt)); setPayNote(""); setEvents([]); setMembers([]); setSeats(null); setReqs([]); setTeamSales([]);
+    const res = await fetch(`/api/platform/companies/${row.id}`, { cache: "no-store" });
     if (res.ok) setEvents((await res.json()).events ?? []);
-    if (mres.ok) setMembers((await mres.json()).members ?? []);
+    await loadTeam(row.id);
   }
 
   async function updateMember(member: Member, change: { roleCode?: string; status?: string }, success: string) {
@@ -238,6 +286,26 @@ export default function PlataformaPage() {
         </p>
       )}
 
+      {queue.length > 0 && (
+        <Panel title={`Solicitações de usuário aguardando você (${queue.length})`} noPadding>
+          <ul className="divide-y divide-slate-100 text-xs">
+            {queue.map((q) => (
+              <li key={q.id} className="flex flex-wrap items-center justify-between gap-2 p-3">
+                <div className="min-w-0">
+                  <p className="font-semibold text-slate-900">{q.name} <span className="font-normal text-slate-400">· {ROLE_LABELS[q.roleCode] ?? q.roleCode}</span></p>
+                  <p className="text-[11px] text-slate-500">{q.email}{q.phone ? ` · ${q.phone}` : ""} · {q.companyName}{q.requestedByName ? ` · pedido por ${q.requestedByName}` : ""}</p>
+                  {q.notes && <p className="text-[11px] text-slate-400">{q.notes}</p>}
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="success" disabled={busy} onClick={() => void decideRequest(q.companyId, q.id, "approve")}>Autorizar</Button>
+                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => void decideRequest(q.companyId, q.id, "reject")}>Recusar</Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      )}
+
       <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Filtrar por situação">
         {FILTERS.map((f) => (
           <button key={f.id} type="button" role="tab" aria-selected={filter === f.id} onClick={() => setFilter(f.id)}
@@ -304,6 +372,61 @@ export default function PlataformaPage() {
               </div>
               <p className="text-[10px] text-slate-400">Bloqueio vale na hora, inclusive para quem já está logado. A senha provisória é do administrador ({selected.adminEmail ?? "—"}) e encerra as sessões abertas dele.</p>
               <p className="text-[10px] text-slate-400">{selected.userCount} usuário(s) · {selected.establishmentCount} estabelecimento(s) · último acesso {selected.lastLoginAt ? formatDateTime(selected.lastLoginAt) : "nunca"}</p>
+            </section>
+
+            <section className="space-y-3 border-t border-slate-100 pt-4">
+              <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Limite e autorização de usuários</h4>
+              {seats && (
+                <>
+                  <p className="text-slate-600"><span className="font-mono font-semibold">{seats.active}/{seats.max}</span> usuários ativos{seats.pending > 0 ? ` · ${seats.pending} solicitação(ões) pendente(s)` : ""}</p>
+                  <div className="flex items-end gap-2">
+                    <Field label="Máximo de usuários"><Input type="number" min={1} max={1000} value={maxUsersInput} onChange={(e) => setMaxUsersInput(e.target.value)} className="w-28" /></Field>
+                    <Button variant="outline" loading={busy} onClick={() => void savePolicy({ maxUsers: Number(maxUsersInput) })}>Salvar limite</Button>
+                  </div>
+                  <Field label="Quem autoriza novos usuários">
+                    <Select value={seats.mode} disabled={busy} onChange={(e) => void savePolicy({ mode: e.target.value })}>
+                      <option value="platform">Somente eu (administrador da plataforma)</option>
+                      <option value="company">O administrador da empresa, dentro do limite</option>
+                    </Select>
+                  </Field>
+                </>
+              )}
+              {reqs.length > 0 && (
+                <ul className="divide-y divide-slate-100">
+                  {reqs.map((q) => (
+                    <li key={q.id} className="space-y-1.5 py-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-slate-800">{q.name} <span className="font-normal text-slate-400">· {ROLE_LABELS[q.roleCode] ?? q.roleCode}</span></p>
+                          <p className="truncate text-[11px] text-slate-400">{q.email} · {formatDateTime(q.createdAt)}</p>
+                          {q.decidedByName && <p className="text-[10px] text-slate-400">Decidido por {q.decidedByName}</p>}
+                        </div>
+                        <Badge tone={q.status === "pending" ? "warning" : q.status === "approved" ? "success" : "neutral"}>{q.status === "pending" ? "Pendente" : q.status === "approved" ? "Autorizado" : q.status === "rejected" ? "Recusado" : "Cancelado"}</Badge>
+                      </div>
+                      {q.status === "pending" && (
+                        <div className="flex gap-2">
+                          <Button size="sm" variant="success" disabled={busy} onClick={() => void decideRequest(selected.id, q.id, "approve")}>Autorizar</Button>
+                          <Button size="sm" variant="ghost" disabled={busy} onClick={() => void decideRequest(selected.id, q.id, "reject")}>Recusar</Button>
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <section className="space-y-2 border-t border-slate-100 pt-4">
+              <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Vendas por colaborador (30 dias)</h4>
+              {teamSales.length === 0 ? <p className="text-slate-400">Sem dados.</p> : (
+                <ul className="divide-y divide-slate-100">
+                  {teamSales.map((t) => (
+                    <li key={t.userId} className="flex items-center justify-between gap-2 py-2">
+                      <div className="min-w-0"><p className="truncate font-medium text-slate-800">{t.name}</p><p className="text-[10px] text-slate-400">{ROLE_LABELS[t.roleCode] ?? t.roleCode}{t.lastSaleAt ? ` · última venda ${formatDateTime(t.lastSaleAt)}` : ""}</p></div>
+                      <div className="text-right"><p className="font-mono font-semibold">{brl(t.total)}</p><p className="text-[10px] text-slate-400">{t.salesCount} venda(s) · ticket {brl(t.avgTicket)}</p></div>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
 
             <section className="space-y-2 border-t border-slate-100 pt-4">

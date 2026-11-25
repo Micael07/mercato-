@@ -23,6 +23,7 @@ import {
 } from "@/db";
 import { recordAudit } from "@/lib/audit";
 import { roundMoney, toNumber } from "@/lib/format";
+import { addDaysStr, todayInTz } from "@/lib/dates";
 
 export class DomainError extends Error {
   status: number;
@@ -886,7 +887,7 @@ export async function completeSaleTx(input: CompleteSaleInput) {
             })
             .where(eq(customers.id, input.customerId));
 
-          const todayStr = new Date().toISOString().slice(0, 10);
+          const todayStr = todayInTz();
           const due = new Date(Date.now() + 30 * 86400 * 1000)
             .toISOString()
             .slice(0, 10);
@@ -1265,10 +1266,9 @@ export async function receivePurchaseOrderTx(params: {
     });
 
     if (params.generatePayable !== false && receivedValue > 0) {
-      const todayStr = new Date().toISOString().slice(0, 10);
+      const todayStr = todayInTz();
       const dueStr =
-        params.dueDate ??
-        new Date(Date.now() + 30 * 86400 * 1000).toISOString().slice(0, 10);
+        params.dueDate ?? addDaysStr(todayStr, 30);
 
       await tx.insert(financialEntries).values({
         companyId: params.companyId,
