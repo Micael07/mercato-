@@ -5,6 +5,7 @@ import { requireApiAuth } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import { isValidEmail, sanitizeText } from "@/lib/security";
 import { getSeats, ROLE_CODES } from "@/lib/team";
+import { computeRecoveryHash } from "@/lib/recovery";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,7 @@ export async function GET(req: Request) {
     .where(eq(userRequests.companyId, ctx.company.id))
     .orderBy(desc(userRequests.createdAt))
     .limit(100);
-  return NextResponse.json({ requests, seats: await getSeats(ctx.company.id) });
+  return NextResponse.json({ requests: requests.map(({ recoveryHash, ...r }) => (void recoveryHash, r)), seats: await getSeats(ctx.company.id) });
 }
 
 /** O administrador da empresa informa os dados de quem quer autorizar. */
@@ -39,6 +40,14 @@ export async function POST(req: Request) {
   const roleCode = String(body.roleCode ?? "cashier");
   if (!name || !isValidEmail(email) || !ROLE_CODES.includes(roleCode as (typeof ROLE_CODES)[number])) {
     return NextResponse.json({ error: "Informe nome, e-mail válido e perfil." }, { status: 400 });
+  }
+
+  const recoveryHash = computeRecoveryHash({ cpf: body.cpf, fullName: name, birthDate: body.birthDate });
+  if (!recoveryHash) {
+    return NextResponse.json(
+      { error: "Informe nome completo (nome e sobrenome), CPF válido e data de nascimento do colaborador." },
+      { status: 400 }
+    );
   }
 
   const [dupUser] = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
@@ -75,6 +84,7 @@ export async function POST(req: Request) {
       phone: sanitizeText(body.phone, 30) || null,
       roleCode,
       notes: sanitizeText(body.notes, 500) || null,
+      recoveryHash,
       requestedBy: ctx.user.id,
       requestedByName: ctx.user.name,
     })
@@ -89,5 +99,5 @@ export async function POST(req: Request) {
     entityId: created.id,
     newData: { email, roleCode },
   });
-  return NextResponse.json({ request: created, seats: await getSeats(ctx.company.id) }, { status: 201 });
+  return NextResponse.json({ request: { ...created, recoveryHash: undefined }, seats: await getSeats(ctx.company.id) }, { status: 201 });
 }

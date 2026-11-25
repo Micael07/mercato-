@@ -133,7 +133,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="erp-context" aria-busy={changingContext}>
             <label className="erp-context-field"><Building2 className="h-3.5 w-3.5" /><div><small>Empresa</small><select aria-label="Empresa ativa" value={session.company.id} disabled={changingContext} onChange={(event) => requestContext({ companyId: event.target.value })}>{session.availableCompanies.map((company) => <option key={company.companyId} value={company.companyId}>{company.tradeName}</option>)}</select></div><span className="erp-context-id">{formatCnpjCpf(session.company.cnpj)}</span></label>
             <label className="erp-context-field"><Store className="h-3.5 w-3.5" /><div><small>Estabelecimento</small><select aria-label="Estabelecimento ativo" value={session.establishment.id} disabled={changingContext} onChange={(event) => requestContext({ companyId: session.company.id, establishmentId: event.target.value })}>{companyEntry?.establishments.map((establishment) => <option key={establishment.id} value={establishment.id}>{establishment.code} · {establishment.name}</option>)}</select></div></label>
-            <div className="erp-user"><span className="erp-user-icon"><UserRound className="h-4 w-4" /></span><div><strong title={session.user.name}>{session.user.name}</strong><small>{role}</small></div></div>
+            <div className="erp-user"><span className="erp-user-icon"><UserRound className="h-4 w-4" /></span><div><strong title={session.user.name}>{session.user.name}</strong><small>{role} · <Link href="/trocar-senha" className="underline">Alterar senha</Link></small></div></div>
           </div>
         </div>
         <div className="erp-navigation-row">
@@ -156,9 +156,19 @@ export function AppShell({ children }: { children: ReactNode }) {
           <button type="button" className="erp-jump" onClick={() => setQuickOpen(true)} aria-label="Buscar módulo"><Search className="h-3.5 w-3.5" /><span>Localizar módulo</span><kbd>Ctrl K</kbd></button>
         </div>
       </header>
-      {session.company.licenseState === "expiring" && !session.isPlatformAdmin && (
-        <p role="status" className="no-print border-b border-amber-200 bg-amber-50 px-6 py-2 text-[11px] text-amber-800">
-          Sua licença vence {session.company.licenseDaysLeft === 1 ? "amanhã" : `em ${session.company.licenseDaysLeft} dias`}{session.company.licenseExpiresAt ? ` (${formatDate(session.company.licenseExpiresAt)})` : ""}. Renove para não perder o acesso.
+      {session.company.licenseState === "expiring" && !session.isPlatformAdmin && (session.membership.roleCode === "admin" || session.membership.roleCode === "manager") && (() => {
+        const d = session.company.licenseDaysLeft ?? 0;
+        const urgent = d <= 3;
+        const contact = process.env.NEXT_PUBLIC_SUPPORT_CONTACT?.trim();
+        return (
+          <p role="status" className={`no-print border-b px-6 py-2 text-[11px] ${urgent ? "border-red-200 bg-red-50 text-red-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+            <strong>Lembrete de pagamento:</strong> a licença do Mercato vence {d <= 1 ? "amanhã" : `em ${d} dias`}{session.company.licenseExpiresAt ? ` (${formatDate(session.company.licenseExpiresAt)})` : ""}. Após o vencimento ninguém da empresa consegue entrar. Regularize{contact ? ` com ${contact}` : " com o fornecedor do sistema"}.
+          </p>
+        );
+      })()}
+      {session.user.recoveryConfigured === false && !session.isPlatformAdmin && (
+        <p role="status" className="no-print border-b border-sky-200 bg-sky-50 px-6 py-2 text-[11px] text-sky-800">
+          Cadastre seus dados de recuperação (CPF e nascimento) para poder redefinir a senha sozinho. <Link href="/trocar-senha" className="font-semibold underline">Completar agora</Link>
         </p>
       )}
       <div className="erp-breadcrumb-row no-print"><nav aria-label="Caminho da página" className="erp-breadcrumb"><Link href="/">Início</Link>{pathname !== "/" && <><ChevronRight className="h-2.5 w-2.5" /><span>{activeModule?.label}</span></>}<ChevronRight className="h-2.5 w-2.5" /><span className="erp-breadcrumb-current" aria-current="page">{currentLabel}</span></nav><span className="erp-breadcrumb-extra">{session.company.tradeName} · {session.establishment.code}</span></div>

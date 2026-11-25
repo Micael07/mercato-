@@ -49,6 +49,7 @@ export async function POST(
       passwordHash: hashPassword(tempPassword),
       resetToken: null,
       resetTokenExpiresAt: null,
+      mustChangePassword: true,
       sessionValidAfter: new Date(),
       updatedAt: new Date(),
     })

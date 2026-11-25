@@ -111,6 +111,13 @@ export const users = pgTable(
       .defaultNow()
       .notNull(),
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+    // Senha provisória: obriga a troca no primeiro acesso
+    mustChangePassword: boolean("must_change_password").notNull().default(false),
+    // HMAC de CPF + nome + nascimento, usado na recuperação de senha sem e-mail
+    recoveryHash: text("recovery_hash"),
+    recoveryFailedAttempts: integer("recovery_failed_attempts").notNull().default(0),
+    recoveryLockedUntil: timestamp("recovery_locked_until", { withTimezone: true }),
+    passwordChangedAt: timestamp("password_changed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -193,6 +200,7 @@ export const userRequests = pgTable(
     decidedByName: varchar("decided_by_name", { length: 160 }),
     decidedAt: timestamp("decided_at", { withTimezone: true }),
     decisionNote: text("decision_note"),
+    recoveryHash: text("recovery_hash"),
     createdUserId: uuid("created_user_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },

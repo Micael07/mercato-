@@ -371,6 +371,12 @@ export default function PlataformaPage() {
                 <Button variant="outline" loading={busy} onClick={() => void resetPassword()}><KeyRound className="h-3.5 w-3.5" />Gerar senha provisória</Button>
               </div>
               <p className="text-[10px] text-slate-400">Bloqueio vale na hora, inclusive para quem já está logado. A senha provisória é do administrador ({selected.adminEmail ?? "—"}) e encerra as sessões abertas dele.</p>
+              {selected.licenseExpiresAt && (
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <Button size="sm" variant="outline" onClick={() => void copy(`Olá${selected.adminName ? `, ${selected.adminName.split(" ")[0]}` : ""}! Lembrete: a licença do Mercato da ${selected.tradeName} ${new Date(selected.licenseExpiresAt!).getTime() < Date.now() ? "venceu" : "vence"} em ${formatDate(selected.licenseExpiresAt!)}. Para não interromper o acesso da sua equipe, confirme o pagamento da renovação. Qualquer dúvida, é só responder esta mensagem.`)}>Copiar lembrete de cobrança</Button>
+                  <span className="text-[10px] text-slate-400">Cole no WhatsApp do cliente.</span>
+                </div>
+              )}
               <p className="text-[10px] text-slate-400">{selected.userCount} usuário(s) · {selected.establishmentCount} estabelecimento(s) · último acesso {selected.lastLoginAt ? formatDateTime(selected.lastLoginAt) : "nunca"}</p>
             </section>
 

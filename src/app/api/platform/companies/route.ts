@@ -120,7 +120,7 @@ export async function POST(req: Request) {
   const created = await db.transaction(async (tx) => {
     const [user] = await tx
       .insert(users)
-      .values({ name: adminName, email: adminEmail, passwordHash: hashPassword(tempPassword), status: "active" })
+      .values({ name: adminName, email: adminEmail, passwordHash: hashPassword(tempPassword), status: "active", mustChangePassword: true })
       .returning();
     const [company] = await tx
       .insert(companies)

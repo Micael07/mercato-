@@ -10,6 +10,8 @@ export interface SessionData {
     name: string;
     email: string;
     phone: string | null;
+    mustChangePassword?: boolean;
+    recoveryConfigured?: boolean;
   };
   isPlatformAdmin?: boolean;
   company: {

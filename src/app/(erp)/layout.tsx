@@ -18,6 +18,8 @@ export default async function ErpLayout({
     redirect(raw ? "/login?motivo=licenca" : "/login");
   }
 
+  if (ctx.user.mustChangePassword) redirect("/trocar-senha");
+
   const initialSession: SessionData = {
     user: ctx.user,
     isPlatformAdmin: ctx.isPlatformAdmin,

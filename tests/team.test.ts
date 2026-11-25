@@ -12,7 +12,7 @@ const decider = () => ({ id: adminId, name: "ADM" });
 async function addRequest(email: string) {
   const [r] = await db
     .insert(userRequests)
-    .values({ companyId, name: `Colab ${email}`, email, roleCode: "cashier" })
+    .values({ companyId, name: `Colab ${email}`, email, roleCode: "cashier", recoveryHash: "ab".repeat(32) })
     .returning();
   return r.id;
 }
@@ -65,6 +65,9 @@ describe("solicitação e autorização de usuários", () => {
       const [m] = await db.select().from(companyUsers).where(eq(companyUsers.userId, a.userId));
       expect(m.companyId).toBe(companyId);
       expect(m.roleCode).toBe("cashier");
+      const [u] = await db.select().from(users).where(eq(users.id, a.userId));
+      expect(u.mustChangePassword).toBe(true);
+      expect(u.recoveryHash).toBe("ab".repeat(32));
     }
 
     const b = await approveRequest(companyId, idB, decider());

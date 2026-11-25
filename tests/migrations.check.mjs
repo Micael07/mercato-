@@ -33,15 +33,15 @@ test("migrations: banco limpo, repetição, histórico e checksum", {
 
     const first = execute();
     assert.equal(first.status, 0, `${first.stdout}\n${first.stderr}`);
-    assert.match(first.stdout, /6 nova\(s\), 0 já registrada/);
+    assert.match(first.stdout, /7 nova\(s\), 0 já registrada/);
     const recorded = await client.query("SELECT name, checksum FROM mercato_meta.schema_migrations ORDER BY name");
-    assert.equal(recorded.rows.length, 6);
+    assert.equal(recorded.rows.length, 7);
     assert.equal((await client.query("SELECT count(*)::integer AS total FROM public.users")).rows[0].total, 0);
 
     const second = execute();
     assert.equal(second.status, 0, `${second.stdout}\n${second.stderr}`);
-    assert.match(second.stdout, /0 nova\(s\), 6 já registrada/);
-    assert.equal((second.stdout.match(/Já aplicada:/g) || []).length, 6);
+    assert.match(second.stdout, /0 nova\(s\), 7 já registrada/);
+    assert.equal((second.stdout.match(/Já aplicada:/g) || []).length, 7);
 
     const last = recorded.rows.at(-1);
     await client.query("UPDATE mercato_meta.schema_migrations SET checksum=$1 WHERE name=$2", ["0".repeat(64), last.name]);
@@ -55,7 +55,7 @@ test("migrations: banco limpo, repetição, histórico e checksum", {
 
     const final = execute();
     assert.equal(final.status, 0, `${final.stdout}\n${final.stderr}`);
-    assert.equal((await client.query("SELECT count(*)::integer AS total FROM mercato_meta.schema_migrations")).rows[0].total, 6);
+    assert.equal((await client.query("SELECT count(*)::integer AS total FROM mercato_meta.schema_migrations")).rows[0].total, 7);
   } finally {
     await client.end();
   }

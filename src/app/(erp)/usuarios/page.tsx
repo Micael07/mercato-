@@ -84,6 +84,8 @@ export default function UsuariosPage() {
     name: "",
     email: "",
     phone: "",
+    cpf: "",
+    birthDate: "",
     notes: "",
     roleCode: "cashier",
   });
@@ -191,6 +193,17 @@ export default function UsuariosPage() {
     load();
   };
 
+  const resetPassword = async (m: MemberRow) => {
+    if (!window.confirm(`Gerar nova senha provisória para ${m.name}? Ele será desconectado e terá de trocá-la no próximo acesso.`)) return;
+    const res = await fetch(`/api/users/${m.membershipId}/reset-password`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) {
+      toast({ type: "error", title: data.error });
+      return;
+    }
+    setSecret({ email: data.email, password: data.tempPassword });
+  };
+
   const columns: ColumnDef<MemberRow>[] = [
     {
       key: "name",
@@ -250,6 +263,12 @@ export default function UsuariosPage() {
       align: "right",
       hideable: false,
       render: (r) => (
+        <div className="flex items-center justify-end gap-1">
+        {r.userId !== session?.user.id && (
+          <Button size="sm" variant="ghost" onClick={() => void resetPassword(r)}>
+            Senha provisória
+          </Button>
+        )}
         <Button
           size="sm"
           variant="ghost"
@@ -269,6 +288,7 @@ export default function UsuariosPage() {
             </>
           )}
         </Button>
+        </div>
       ),
     },
   ];
@@ -288,7 +308,7 @@ export default function UsuariosPage() {
         <Button
           disabled={!!seats && seats.active + seats.pending >= seats.max}
           onClick={() => {
-            setInviteForm({ name: "", email: "", phone: "", notes: "", roleCode: "cashier" });
+            setInviteForm({ name: "", email: "", phone: "", cpf: "", birthDate: "", notes: "", roleCode: "cashier" });
             setInviteModal(true);
           }}
         >
@@ -428,10 +448,10 @@ export default function UsuariosPage() {
         )}
       </Panel>
 
-      <Modal open={!!secret} onClose={() => setSecret(null)} title="Usuário autorizado" size="sm">
+      <Modal open={!!secret} onClose={() => setSecret(null)} title="Senha provisória" size="sm">
         {secret && (
           <div className="space-y-3 text-xs">
-            <p className="text-slate-600">Entregue estes dados ao colaborador. A senha provisória só aparece agora.</p>
+            <p className="text-slate-600">Entregue estes dados ao colaborador. A senha só aparece agora e deve ser trocada no primeiro acesso.</p>
             <div className="space-y-1 border border-emerald-200 bg-emerald-50 p-3">
               <p>E-mail: <strong>{secret.email}</strong></p>
               <p>Senha provisória: <code className="font-mono text-sm font-bold">{secret.password}</code></p>
@@ -453,11 +473,17 @@ export default function UsuariosPage() {
         size="sm"
       >
         <form onSubmit={handleRequest} className="space-y-3">
-          <Field label="Nome completo" required>
+          <Field label="Nome completo (nome e sobrenome)" required>
             <Input required value={inviteForm.name} onChange={(e) => setInviteForm({ ...inviteForm, name: e.target.value })} />
           </Field>
           <Field label="E-mail (será o login)" required>
             <Input type="email" required value={inviteForm.email} onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })} />
+          </Field>
+          <Field label="CPF" required hint="Usado só para o colaborador recuperar a própria senha. Não fica salvo em texto aberto.">
+            <Input required inputMode="numeric" placeholder="000.000.000-00" value={inviteForm.cpf} onChange={(e) => setInviteForm({ ...inviteForm, cpf: e.target.value })} />
+          </Field>
+          <Field label="Data de nascimento" required>
+            <Input required type="date" value={inviteForm.birthDate} onChange={(e) => setInviteForm({ ...inviteForm, birthDate: e.target.value })} />
           </Field>
           <Field label="Telefone">
             <Input value={inviteForm.phone} onChange={(e) => setInviteForm({ ...inviteForm, phone: e.target.value })} />

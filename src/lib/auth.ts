@@ -133,6 +133,8 @@ export interface AuthContext {
     email: string;
     phone: string | null;
     status: string;
+    mustChangePassword: boolean;
+    recoveryConfigured: boolean;
   };
   company: {
     id: string;
@@ -198,6 +200,8 @@ export async function getRawSessionUser() {
       phone: users.phone,
       status: users.status,
       sessionValidAfter: users.sessionValidAfter,
+      mustChangePassword: users.mustChangePassword,
+      recoveryHash: users.recoveryHash,
     })
     .from(users)
     .where(eq(users.id, payload.userId))
@@ -217,6 +221,8 @@ export async function getRawSessionUser() {
       email: user.email,
       phone: user.phone,
       status: user.status,
+      mustChangePassword: user.mustChangePassword,
+      recoveryConfigured: !!user.recoveryHash,
     },
     payload,
   };
@@ -382,6 +388,15 @@ export async function requireApiAuth(
       error: NextResponse.json(
         { error: "Sessão expirada ou não autenticada." },
         { status: 401 }
+      ),
+    };
+  }
+
+  if (ctx.user.mustChangePassword) {
+    return {
+      error: NextResponse.json(
+        { error: "Troque a senha provisória para continuar.", code: "password_change_required" },
+        { status: 403 }
       ),
     };
   }

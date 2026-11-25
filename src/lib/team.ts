@@ -82,6 +82,8 @@ export async function approveRequest(
         phone: req.phone,
         passwordHash: hashPassword(tempPassword),
         status: "active",
+        mustChangePassword: true,
+        recoveryHash: req.recoveryHash,
       })
       .returning();
     await tx.insert(companyUsers).values({
