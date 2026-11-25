@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
-import { db, users } from "@/db";
+import { and, desc, eq } from "drizzle-orm";
+import { db, users, userRequests, companies, auditLogs } from "@/db";
 import { hashPassword, requirePlatformAdmin } from "@/lib/auth";
 import { extractRequestMeta, recordAudit } from "@/lib/audit";
 import { isPlatformAdminEmail } from "@/lib/platform";
-import { computeRecoveryHash } from "@/lib/recovery";
+import { computeRecoveryHash, decryptProfile, encryptProfile, formatCpf } from "@/lib/recovery";
 import { generateTempPassword, isUuid, isValidEmail, sanitizeText } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +15,47 @@ export const dynamic = "force-dynamic";
  * - Trocar o nome invalida a recuperação por CPF, a menos que cpf + birthDate venham junto.
  * - A conta do dono da plataforma não pode ter e-mail alterado nem ser bloqueada por aqui.
  */
+/** Cadastro completo do usuário (inclui CPF e nascimento descriptografados) + origem e histórico. */
+export async function GET(req: Request, { params }: { params: Promise<{ userId: string }> }) {
+  const auth = await requirePlatformAdmin(req);
+  if ("error" in auth) return auth.error;
+  const { userId } = await params;
+  if (!isUuid(userId)) return NextResponse.json({ error: "Usuário inválido." }, { status: 400 });
+  const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (!u) return NextResponse.json({ error: "Usuário não encontrado." }, { status: 404 });
+
+  const profile = decryptProfile(u.profileEnc);
+  const [origin] = await db
+    .select({
+      requestedByName: userRequests.requestedByName,
+      decidedByName: userRequests.decidedByName,
+      requestedAt: userRequests.createdAt,
+      decidedAt: userRequests.decidedAt,
+      companyName: companies.tradeName,
+    })
+    .from(userRequests)
+    .innerJoin(companies, eq(userRequests.companyId, companies.id))
+    .where(eq(userRequests.createdUserId, userId))
+    .limit(1);
+  const history = await db
+    .select({
+      id: auditLogs.id, action: auditLogs.action, userName: auditLogs.userName,
+      previousData: auditLogs.previousData, newData: auditLogs.newData, createdAt: auditLogs.createdAt,
+    })
+    .from(auditLogs)
+    .where(and(eq(auditLogs.entity, "user"), eq(auditLogs.entityId, userId)))
+    .orderBy(desc(auditLogs.createdAt))
+    .limit(30);
+
+  await recordAudit({ userId: auth.ctx.user.id, userName: auth.ctx.user.name, action: "platform_user_profile_viewed", entity: "user", entityId: userId, ...extractRequestMeta(req) });
+  return NextResponse.json({
+    profile: profile ? { cpf: formatCpf(profile.cpf), birthDate: profile.birthDate } : null,
+    profileState: profile ? "ok" : u.recoveryHash ? "unavailable" : "missing",
+    createdAt: u.createdAt, updatedAt: u.updatedAt, passwordChangedAt: u.passwordChangedAt, lastLoginAt: u.lastLoginAt,
+    origin: origin ?? null, history,
+  });
+}
+
 export async function PATCH(req: Request, { params }: { params: Promise<{ userId: string }> }) {
   const auth = await requirePlatformAdmin(req);
   if ("error" in auth) return auth.error;
@@ -86,15 +127,21 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ userId
     }
   }
 
-  // Dados de recuperação (CPF e nascimento): só gravados, nunca exibidos.
-  if (body.cpf || body.birthDate) {
-    const h = computeRecoveryHash({ cpf: body.cpf, fullName: name, birthDate: body.birthDate });
-    if (!h) return NextResponse.json({ error: "CPF ou data de nascimento inválidos (informe os dois)." }, { status: 400 });
-    patch.recoveryHash = h; patch.recoveryFailedAttempts = 0; patch.recoveryLockedUntil = null;
-    after.recovery = "atualizado";
+  // CPF e nascimento: criptografados no banco e visíveis só ao ADM da plataforma.
+  const known = decryptProfile(target.profileEnc);
+  if (body.cpf !== undefined || body.birthDate !== undefined) {
+    const cpf = body.cpf ? body.cpf : known?.cpf;
+    const birthDate = body.birthDate ? body.birthDate : known?.birthDate;
+    const h = computeRecoveryHash({ cpf, fullName: name, birthDate });
+    const enc = encryptProfile({ cpf, birthDate });
+    if (!h || !enc) return NextResponse.json({ error: "CPF ou data de nascimento inválidos." }, { status: 400 });
+    patch.recoveryHash = h; patch.profileEnc = enc; patch.recoveryFailedAttempts = 0; patch.recoveryLockedUntil = null;
+    after.cpf = "atualizado"; after.birthDate = "atualizado";
   } else if (patch.name && target.recoveryHash) {
-    patch.recoveryHash = null; // o nome faz parte da verificação
-    after.recovery = "removido (nome alterado): usuário precisa recadastrar CPF e nascimento";
+    // o nome faz parte da verificação: recalcula quando o cadastro está legível, senão limpa
+    const h = known ? computeRecoveryHash({ cpf: known.cpf, fullName: name, birthDate: known.birthDate }) : null;
+    patch.recoveryHash = h;
+    after.recovery = h ? "recalculado com o novo nome" : "removido (nome alterado): usuário precisa recadastrar CPF e nascimento";
   }
   if (body.unlockRecovery === true) { patch.recoveryFailedAttempts = 0; patch.recoveryLockedUntil = null; after.recoveryUnlocked = true; }
 

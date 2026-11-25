@@ -70,3 +70,41 @@ export function recoveryMatches(stored: string | null | undefined, candidate: st
 
 export const RECOVERY_MAX_ATTEMPTS = 5;
 export const RECOVERY_LOCK_MINUTES = 30;
+
+// --- Cadastro (CPF e nascimento) criptografado, legível apenas pelo ADM da plataforma ---
+
+function profileKey(): Buffer {
+  return crypto.createHash("sha256").update(`profile-key|${secret()}`).digest();
+}
+
+export interface UserProfile { cpf: string; birthDate: string }
+
+/** Criptografa CPF (só dígitos) e nascimento (AAAA-MM-DD). Retorna null se inválidos. */
+export function encryptProfile(input: { cpf: unknown; birthDate: unknown }): string | null {
+  const cpf = onlyDigits(input.cpf);
+  const birthDate = parseBirthDate(input.birthDate);
+  if (!isValidCpf(cpf) || !birthDate) return null;
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", profileKey(), iv);
+  const data = Buffer.concat([cipher.update(JSON.stringify({ cpf, birthDate }), "utf8"), cipher.final()]);
+  return [iv.toString("hex"), cipher.getAuthTag().toString("hex"), data.toString("hex")].join(".");
+}
+
+export function decryptProfile(stored: string | null | undefined): UserProfile | null {
+  if (!stored) return null;
+  try {
+    const [iv, tag, data] = stored.split(".");
+    const d = crypto.createDecipheriv("aes-256-gcm", profileKey(), Buffer.from(iv, "hex"));
+    d.setAuthTag(Buffer.from(tag, "hex"));
+    const json = Buffer.concat([d.update(Buffer.from(data, "hex")), d.final()]).toString("utf8");
+    const p = JSON.parse(json);
+    return typeof p.cpf === "string" && typeof p.birthDate === "string" ? p : null;
+  } catch {
+    return null; // AUTH_SECRET trocado ou dado corrompido
+  }
+}
+
+export function formatCpf(cpf: string): string {
+  const d = onlyDigits(cpf);
+  return d.length === 11 ? `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}` : cpf;
+}

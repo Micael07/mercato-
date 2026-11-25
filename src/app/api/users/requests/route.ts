@@ -5,7 +5,7 @@ import { requireApiAuth } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import { isValidEmail, sanitizeText } from "@/lib/security";
 import { getSeats, ROLE_CODES } from "@/lib/team";
-import { computeRecoveryHash } from "@/lib/recovery";
+import { computeRecoveryHash, encryptProfile } from "@/lib/recovery";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +20,7 @@ export async function GET(req: Request) {
     .where(eq(userRequests.companyId, ctx.company.id))
     .orderBy(desc(userRequests.createdAt))
     .limit(100);
-  return NextResponse.json({ requests: requests.map(({ recoveryHash, ...r }) => (void recoveryHash, r)), seats: await getSeats(ctx.company.id) });
+  return NextResponse.json({ requests: requests.map(({ recoveryHash, profileEnc, ...r }) => (void recoveryHash, void profileEnc, r)), seats: await getSeats(ctx.company.id) });
 }
 
 /** O administrador da empresa informa os dados de quem quer autorizar. */
@@ -85,6 +85,7 @@ export async function POST(req: Request) {
       roleCode,
       notes: sanitizeText(body.notes, 500) || null,
       recoveryHash,
+      profileEnc: encryptProfile({ cpf: body.cpf, birthDate: body.birthDate }),
       requestedBy: ctx.user.id,
       requestedByName: ctx.user.name,
     })
@@ -99,5 +100,5 @@ export async function POST(req: Request) {
     entityId: created.id,
     newData: { email, roleCode },
   });
-  return NextResponse.json({ request: { ...created, recoveryHash: undefined }, seats: await getSeats(ctx.company.id) }, { status: 201 });
+  return NextResponse.json({ request: { ...created, recoveryHash: undefined, profileEnc: undefined }, seats: await getSeats(ctx.company.id) }, { status: 201 });
 }

@@ -19,6 +19,21 @@ interface UserRow {
   isPlatformAdmin: boolean; memberships: Membership[];
 }
 
+interface Detail {
+  profile: { cpf: string; birthDate: string } | null;
+  profileState: "ok" | "unavailable" | "missing";
+  createdAt: string; updatedAt: string; passwordChangedAt: string | null; lastLoginAt: string | null;
+  origin: { requestedByName: string | null; decidedByName: string | null; requestedAt: string; decidedAt: string | null; companyName: string } | null;
+  history: Array<{ id: string; action: string; userName: string | null; newData: Record<string, unknown> | null; previousData: Record<string, unknown> | null; createdAt: string }>;
+}
+const ACTION_LABELS: Record<string, string> = {
+  platform_user_updated: "Cadastro alterado pelo ADM", platform_user_password_reset: "Senha provisória gerada pelo ADM",
+  platform_user_logout: "Sessões encerradas pelo ADM", password_changed: "Senha trocada pelo usuário",
+  password_recovered: "Senha recuperada por CPF", company_password_reset: "Senha provisória gerada pelo administrador da empresa",
+  platform_user_profile_viewed: "Cadastro consultado pelo ADM", platform_password_reset: "Senha provisória gerada pelo ADM",
+};
+const FIELD_LABELS: Record<string, string> = { name: "Nome", email: "E-mail", phone: "Telefone", status: "Situação", cpf: "CPF", birthDate: "Nascimento", recovery: "Recuperação" };
+
 export default function PlataformaUsuariosPage() {
   const { session } = useSession();
   const { toast } = useToast();
@@ -31,6 +46,7 @@ export default function PlataformaUsuariosPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [form, setForm] = useState({ name: "", email: "", phone: "", cpf: "", birthDate: "" });
   const [busy, setBusy] = useState(false);
+  const [detail, setDetail] = useState<Detail | null>(null);
   const [secret, setSecret] = useState<{ email: string; password: string } | null>(null);
 
   const load = useCallback(async () => {
@@ -60,9 +76,19 @@ export default function PlataformaUsuariosPage() {
     );
   }, [rows, search, companyFilter, statusFilter]);
 
+  async function loadDetail(id: string, fill = true) {
+    const res = await fetch(`/api/platform/users/${id}`, { cache: "no-store" });
+    if (!res.ok) { setDetail(null); return; }
+    const d = (await res.json()) as Detail;
+    setDetail(d);
+    if (fill) setForm((f) => ({ ...f, cpf: d.profile?.cpf ?? "", birthDate: d.profile?.birthDate ?? "" }));
+  }
+
   function openUser(r: UserRow) {
     setSelectedId(r.id);
+    setDetail(null);
     setForm({ name: r.name, email: r.email, phone: r.phone ?? "", cpf: "", birthDate: "" });
+    void loadDetail(r.id);
   }
 
   async function call(body: Record<string, unknown>, success: string, onOk?: (d: Record<string, string>) => void) {
@@ -75,7 +101,7 @@ export default function PlataformaUsuariosPage() {
       toast({ type: "success", title: data.recoveryCleared ? `${success}. A recuperação por CPF foi limpa: peça ao usuário para recadastrar ou informe CPF e nascimento.` : success });
       onOk?.(data);
       await load();
-      setForm((f) => ({ ...f, cpf: "", birthDate: "" }));
+      await loadDetail(selected.id, true);
     } finally { setBusy(false); }
   }
 
@@ -148,7 +174,11 @@ export default function PlataformaUsuariosPage() {
               <Field label="E-mail (login)" hint={selected.isPlatformAdmin ? "Definido por PLATFORM_ADMIN_EMAILS." : undefined}><Input type="email" value={form.email} disabled={selected.isPlatformAdmin} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
               <Field label="Telefone"><Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
               <div className="space-y-2 border border-slate-100 p-3">
-                <p className="text-[11px] text-slate-500">Recuperação de senha: {selected.recoveryConfigured ? "cadastrada" : "pendente"}. CPF e nascimento nunca são exibidos; informe para cadastrar ou substituir.</p>
+                <p className="text-[11px] text-slate-500">
+                  Recuperação de senha: {selected.recoveryConfigured ? "cadastrada" : "pendente"}.
+                  {detail?.profileState === "unavailable" && " O CPF foi cadastrado antes deste recurso e não pode ser exibido: informe de novo para que apareça aqui."}
+                  {detail?.profileState === "missing" && " Ainda sem CPF e nascimento."}
+                </p>
                 <div className="grid grid-cols-2 gap-2">
                   <Field label="CPF"><Input inputMode="numeric" placeholder="000.000.000-00" value={form.cpf} onChange={(e) => setForm({ ...form, cpf: e.target.value })} /></Field>
                   <Field label="Nascimento"><Input type="date" value={form.birthDate} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} /></Field>
@@ -157,6 +187,15 @@ export default function PlataformaUsuariosPage() {
                   <Button size="sm" variant="outline" disabled={busy} onClick={() => void call({ unlockRecovery: true }, "Recuperação desbloqueada")}>Desbloquear recuperação</Button>
                 )}
               </div>
+              {detail && (
+                <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 border border-slate-100 bg-slate-50 p-3 text-[11px]">
+                  <dt className="text-slate-400">Cadastrado em</dt><dd className="text-slate-700">{formatDateTime(detail.createdAt)}</dd>
+                  <dt className="text-slate-400">Última alteração</dt><dd className="text-slate-700">{formatDateTime(detail.updatedAt)}</dd>
+                  <dt className="text-slate-400">Senha alterada</dt><dd className="text-slate-700">{detail.passwordChangedAt ? formatDateTime(detail.passwordChangedAt) : "—"}</dd>
+                  <dt className="text-slate-400">Origem</dt>
+                  <dd className="text-slate-700">{detail.origin ? `Solicitado por ${detail.origin.requestedByName ?? "—"} (${detail.origin.companyName}), autorizado por ${detail.origin.decidedByName ?? "—"}` : "Cadastro direto (criado pelo ADM ou conta antiga)"}</dd>
+                </dl>
+              )}
               <Button loading={busy} onClick={() => void call({ name: form.name, email: form.email, phone: form.phone, ...(form.cpf || form.birthDate ? { cpf: form.cpf, birthDate: form.birthDate } : {}) }, "Dados salvos")}>Salvar dados</Button>
             </section>
 
@@ -171,6 +210,23 @@ export default function PlataformaUsuariosPage() {
                   : <Button size="sm" variant="success" disabled={busy} onClick={() => void call({ status: "active" }, "Usuário reativado")}><Unlock className="h-3.5 w-3.5" />Reativar</Button>)}
               </div>
               <p className="text-[10px] text-slate-400">Bloquear aqui vale para todas as empresas do usuário. Para bloquear só em uma empresa, use o perfil abaixo.</p>
+            </section>
+
+            <section className="space-y-2 border-t border-slate-100 pt-4">
+              <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Histórico do cadastro</h4>
+              {!detail || detail.history.filter((h) => h.action !== "platform_user_profile_viewed").length === 0 ? <p className="text-slate-400">Sem registros.</p> : (
+                <ul className="divide-y divide-slate-100">
+                  {detail.history.filter((h) => h.action !== "platform_user_profile_viewed").map((h) => (
+                    <li key={h.id} className="py-2">
+                      <p className="font-medium text-slate-700">{ACTION_LABELS[h.action] ?? h.action}</p>
+                      <p className="text-[10px] text-slate-400">{formatDateTime(h.createdAt)}{h.userName ? ` · ${h.userName}` : ""}</p>
+                      {h.newData && Object.keys(h.newData).length > 0 && (
+                        <p className="mt-0.5 text-[11px] text-slate-500">{Object.entries(h.newData).filter(([k]) => FIELD_LABELS[k]).map(([k, v]) => `${FIELD_LABELS[k]}: ${h.previousData && (h.previousData as Record<string, unknown>)[k] !== undefined ? `${String((h.previousData as Record<string, unknown>)[k] ?? "(vazio)")} → ` : ""}${String(v)}`).join(" · ")}</p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
 
             <section className="space-y-2 border-t border-slate-100 pt-4">

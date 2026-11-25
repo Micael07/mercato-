@@ -19,7 +19,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     .where(eq(userRequests.companyId, id))
     .orderBy(desc(userRequests.createdAt))
     .limit(100);
-  return NextResponse.json({ requests: requests.map(({ recoveryHash, ...r }) => (void recoveryHash, r)), seats: await getSeats(id) });
+  return NextResponse.json({ requests: requests.map(({ recoveryHash, profileEnc, ...r }) => (void recoveryHash, void profileEnc, r)), seats: await getSeats(id) });
 }
 
 /** Corpo: { requestId, action: "approve" | "reject", note? } */

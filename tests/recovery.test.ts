@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { computeRecoveryHash, isValidCpf, normalizeName, parseBirthDate, recoveryMatches } from "../src/lib/recovery";
+import { decryptProfile, encryptProfile, formatCpf, computeRecoveryHash, isValidCpf, normalizeName, parseBirthDate, recoveryMatches } from "../src/lib/recovery";
 
 beforeAll(() => { process.env.AUTH_SECRET = process.env.AUTH_SECRET || "testsecret-testsecret-testsecret-12345"; });
 
@@ -39,5 +39,16 @@ describe("recuperação de senha sem e-mail", () => {
     expect(computeRecoveryHash({ cpf: "52998224725", fullName: "João", birthDate: "1990-05-17" })).toBeNull();
     expect(computeRecoveryHash({ cpf: "11111111111", fullName: "João Silva", birthDate: "1990-05-17" })).toBeNull();
     expect(computeRecoveryHash({ cpf: "52998224725", fullName: "João Silva", birthDate: "x" })).toBeNull();
+  });
+
+  it("guarda CPF e nascimento criptografados e devolve o original", () => {
+    const enc = encryptProfile({ cpf: "529.982.247-25", birthDate: "17/05/1990" })!;
+    expect(enc).toBeTruthy();
+    expect(enc).not.toContain("52998224725");
+    expect(decryptProfile(enc)).toEqual({ cpf: "52998224725", birthDate: "1990-05-17" });
+    expect(formatCpf("52998224725")).toBe("529.982.247-25");
+    expect(encryptProfile({ cpf: "111", birthDate: "1990-05-17" })).toBeNull();
+    expect(decryptProfile(enc.slice(0, -4) + "0000")).toBeNull();
+    expect(decryptProfile(null)).toBeNull();
   });
 });

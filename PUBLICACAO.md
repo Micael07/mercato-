@@ -22,3 +22,10 @@
 - O ADM corrige nome, e-mail, telefone, cadastra/substitui CPF e nascimento (nunca exibidos), gera senha provisória, desconecta, bloqueia (todas as empresas) e ajusta perfil/bloqueio por empresa. Tudo fica na auditoria.
 - Trocar o nome limpa a recuperação por CPF (o nome faz parte da verificação), a menos que CPF e nascimento sejam informados junto.
 - A conta do ADM master não pode ser bloqueada nem ter o e-mail alterado por essa tela.
+
+## Cadastro completo do usuário no painel do ADM (migração 008)
+
+- Ao tocar em Gerenciar em /plataforma/usuarios o ADM vê CPF, nascimento, datas, origem (quem solicitou/autorizou) e o histórico de alterações.
+- CPF e nascimento ficam criptografados (AES-256-GCM, chave derivada do AUTH_SECRET); só o ADM master os lê, e cada consulta é auditada. Trocar o AUTH_SECRET torna esses dados ilegíveis (reinformar).
+- Usuários criados antes da migração 008 têm só o hash de recuperação: o CPF aparece depois que o ADM ou o próprio usuário informar de novo.
+- Trocar o nome recalcula a recuperação automaticamente quando o CPF está legível.

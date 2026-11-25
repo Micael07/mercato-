@@ -5,7 +5,7 @@ import { getRawSessionUser, hashPassword, verifyPassword, setSessionCookie } fro
 import { recordAudit, extractRequestMeta } from "@/lib/audit";
 import { checkRateLimit, getClientIp, rateLimitResponse } from "@/lib/rate-limit";
 import { validatePasswordStrength } from "@/lib/security";
-import { computeRecoveryHash } from "@/lib/recovery";
+import { computeRecoveryHash, encryptProfile } from "@/lib/recovery";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +47,7 @@ export async function POST(req: Request) {
   }
 
   let recoveryHash = row.recoveryHash;
+  let profileEnc = row.profileEnc;
   const wantsRecovery = body.cpf !== undefined || body.birthDate !== undefined;
   if (!recoveryHash || wantsRecovery) {
     const h = computeRecoveryHash({ cpf: body.cpf, fullName: row.name, birthDate: body.birthDate });
@@ -57,6 +58,7 @@ export async function POST(req: Request) {
       );
     }
     recoveryHash = h;
+    profileEnc = encryptProfile({ cpf: body.cpf, birthDate: body.birthDate }) ?? profileEnc;
   }
 
   const now = new Date();
@@ -66,6 +68,7 @@ export async function POST(req: Request) {
       passwordHash: hashPassword(newPassword),
       mustChangePassword: false,
       recoveryHash,
+      profileEnc,
       recoveryFailedAttempts: 0,
       recoveryLockedUntil: null,
       passwordChangedAt: now,

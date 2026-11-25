@@ -84,6 +84,7 @@ export async function approveRequest(
         status: "active",
         mustChangePassword: true,
         recoveryHash: req.recoveryHash,
+        profileEnc: req.profileEnc,
       })
       .returning();
     await tx.insert(companyUsers).values({

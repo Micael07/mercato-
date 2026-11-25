@@ -115,6 +115,7 @@ export const users = pgTable(
     mustChangePassword: boolean("must_change_password").notNull().default(false),
     // HMAC de CPF + nome + nascimento, usado na recuperação de senha sem e-mail
     recoveryHash: text("recovery_hash"),
+    profileEnc: text("profile_enc"),
     recoveryFailedAttempts: integer("recovery_failed_attempts").notNull().default(0),
     recoveryLockedUntil: timestamp("recovery_locked_until", { withTimezone: true }),
     passwordChangedAt: timestamp("password_changed_at", { withTimezone: true }),
@@ -201,6 +202,7 @@ export const userRequests = pgTable(
     decidedAt: timestamp("decided_at", { withTimezone: true }),
     decisionNote: text("decision_note"),
     recoveryHash: text("recovery_hash"),
+    profileEnc: text("profile_enc"),
     createdUserId: uuid("created_user_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
