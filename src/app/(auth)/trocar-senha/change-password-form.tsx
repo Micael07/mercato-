@@ -56,14 +56,16 @@ export function ChangePasswordForm({
         <h1 className="text-base font-bold text-slate-900">{forced ? "Crie sua senha" : "Alterar senha"}</h1>
         <p className="mb-5 mt-1 text-xs text-slate-500">
           {forced
-            ? `Olá, ${userName}. Sua senha atual é provisória: defina uma nova para continuar.`
+            ? `Olá, ${userName}. Você entrou com uma senha provisória: defina agora a sua senha para continuar.`
             : "Escolha uma nova senha. As outras sessões abertas serão encerradas."}
         </p>
         {error && <p role="alert" className="mb-4 border border-red-200 bg-red-50 p-3 text-xs text-red-700">{error}</p>}
         <form onSubmit={submit} className="space-y-4">
-          <Field label={forced ? "Senha provisória" : "Senha atual"} required>
-            <Input type="password" required autoComplete="current-password" value={form.currentPassword} onChange={set("currentPassword")} />
-          </Field>
+          {!forced && (
+            <Field label="Senha atual" required>
+              <Input type="password" required autoComplete="current-password" value={form.currentPassword} onChange={set("currentPassword")} />
+            </Field>
+          )}
           <Field label="Nova senha" required hint="Mínimo 8 caracteres, com maiúscula, minúscula e número ou símbolo.">
             <Input type="password" required autoComplete="new-password" value={form.newPassword} onChange={set("newPassword")} />
           </Field>

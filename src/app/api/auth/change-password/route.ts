@@ -34,12 +34,15 @@ export async function POST(req: Request) {
   const newPassword = String(body.newPassword ?? "");
 
   const [row] = await db.select().from(users).where(eq(users.id, user.id)).limit(1);
-  if (!row || !verifyPassword(currentPassword, row.passwordHash)) {
+  if (!row) return NextResponse.json({ error: "Sessão expirada." }, { status: 401 });
+  // Na troca obrigatória a pessoa acabou de entrar com a senha provisória, então a sessão já
+  // a identifica: não pedimos de novo (evita erro de digitação/preenchimento automático do navegador).
+  if (!row.mustChangePassword && !verifyPassword(currentPassword, row.passwordHash)) {
     return NextResponse.json({ error: "Senha atual incorreta." }, { status: 400 });
   }
   const check = validatePasswordStrength(newPassword);
   if (!check.valid) return NextResponse.json({ error: check.error }, { status: 400 });
-  if (newPassword === currentPassword) {
+  if (verifyPassword(newPassword, row.passwordHash)) {
     return NextResponse.json({ error: "A nova senha deve ser diferente da atual." }, { status: 400 });
   }
 
