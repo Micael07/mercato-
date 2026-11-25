@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, Download, FileSpreadsheet, Printer } from "lucide-react";
+import { ArrowDown, ArrowUp, Download, FileSpreadsheet, FileText, Printer, Receipt, Star, X } from "lucide-react";
 import { useSession } from "@/components/session-provider";
 import { downloadCsv, downloadExcelXml, formatCnpjCpf } from "@/lib/format";
 import {
@@ -12,7 +12,12 @@ import {
   translateValue,
   visibleKeys,
 } from "@/lib/report-format";
-import { Button, Input, Select } from "@/components/ui/primitives";
+import { Button, Input, Modal, Select } from "@/components/ui/primitives";
+import { ReportChart } from "@/components/report-chart";
+import { ReportThermal } from "@/components/report-thermal";
+import { downloadReportPdf, isLandscape } from "@/lib/report-pdf";
+import { chartSpec, deltaPercent, previousRange } from "@/lib/report-chart";
+import { useToast } from "@/components/ui/toast";
 
 const REPORT_GROUPS = [
   {
@@ -27,6 +32,8 @@ const REPORT_GROUPS = [
       { value: "top_products", label: "Produtos mais vendidos" },
       { value: "stagnant_products", label: "Produtos sem giro no período" },
       { value: "gross_margin", label: "Margem bruta estimada" },
+      { value: "abc_curve", label: "Curva ABC de produtos" },
+      { value: "cash_closing", label: "Fechamento de caixa por turno e operador" },
     ],
   },
   {
@@ -36,6 +43,8 @@ const REPORT_GROUPS = [
       { value: "low_stock", label: "Produtos abaixo do estoque mínimo" },
       { value: "stock_movements", label: "Movimentação de estoque" },
       { value: "inventories", label: "Histórico de inventários" },
+      { value: "expiring_products", label: "Produtos vencidos e a vencer (60 dias)" },
+      { value: "stock_losses", label: "Perdas de estoque (vencimento, quebra, extravio)" },
     ],
   },
   {
@@ -43,6 +52,7 @@ const REPORT_GROUPS = [
     items: [
       { value: "purchases_supplier", label: "Compras por fornecedor" },
       { value: "purchases_period", label: "Compras por período" },
+      { value: "purchase_suggestion", label: "Sugestão de compra (pelo giro do período)" },
     ],
   },
   {
@@ -63,7 +73,7 @@ const REPORT_GROUPS = [
 const ALL_REPORTS = REPORT_GROUPS.flatMap((g) => g.items);
 
 // Estoque e inventário não dependem do período.
-const NO_PERIOD = new Set(["current_stock", "low_stock", "inventories"]);
+const NO_PERIOD = new Set(["current_stock", "low_stock", "inventories", "expiring_products"]);
 
 const isoLocal = (d: Date) => {
   const p = (n: number) => String(n).padStart(2, "0");
@@ -91,6 +101,20 @@ function periodRange(id: (typeof PERIODS)[number]["id"]): [string, string] {
   return [isoLocal(first), isoLocal(last)];
 }
 
+// Linhas clicáveis: de qual coluna vem o valor e que tipo de detalhe buscar.
+const DRILL: Record<string, { kind: string; key: string }> = {
+  sales_product: { kind: "product", key: "sku" },
+  top_products: { kind: "product", key: "sku" },
+  gross_margin: { kind: "product", key: "sku" },
+  abc_curve: { kind: "product", key: "sku" },
+  sales_operator: { kind: "operator", key: "operator" },
+  sales_customer: { kind: "customer", key: "customer" },
+  sales_category: { kind: "category", key: "category" },
+};
+// Relatórios que terminam com linhas de assinatura (conferência).
+const SIGN = new Set(["inventories", "cash_closing", "expiring_products", "stock_losses", "current_stock"]);
+interface SavedReport { id: string; name: string; reportType: string; period: string }
+
 const brDate = (iso: string) => iso.split("-").reverse().join("/");
 
 function initialType(): string {
@@ -110,6 +134,13 @@ export default function RelatoriosPage() {
   const [error, setError] = useState<string | null>(null);
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(null);
   const [emittedAt, setEmittedAt] = useState("");
+  const { toast } = useToast();
+  const [periodId, setPeriodId] = useState<string>("30d");
+  const [compare, setCompare] = useState(false);
+  const [prevRows, setPrevRows] = useState<Array<Record<string, unknown>>>([]);
+  const [saved, setSaved] = useState<SavedReport[]>([]);
+  const [thermalOpen, setThermalOpen] = useState(false);
+  const [drill, setDrill] = useState<{ title: string; rows: Array<Record<string, unknown>> | null } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -125,10 +156,17 @@ export default function RelatoriosPage() {
       }
       setRows(data.rows ?? []);
       setSort(null);
+      if (compare && !NO_PERIOD.has(reportType)) {
+        const [pf, pt] = previousRange(from, to);
+        const pr = await fetch(`/api/reports?${new URLSearchParams({ type: reportType, from: pf, to: pt }).toString()}`);
+        setPrevRows(pr.ok ? ((await pr.json()).rows ?? []) : []);
+      } else {
+        setPrevRows([]);
+      }
     } finally {
       setLoading(false);
     }
-  }, [reportType, from, to]);
+  }, [reportType, from, to, compare]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -136,6 +174,52 @@ export default function RelatoriosPage() {
     }, 0);
     return () => clearTimeout(t);
   }, [load, session?.company.id, session?.establishment.id]);
+
+  const loadSaved = useCallback(async () => {
+    try {
+      const res = await fetch("/api/reports/saved", { cache: "no-store" });
+      if (res.ok) setSaved((await res.json()).saved ?? []);
+    } catch { /* favoritos são opcionais */ }
+  }, []);
+  useEffect(() => {
+    const t = setTimeout(() => void loadSaved(), 0);
+    return () => clearTimeout(t);
+  }, [loadSaved]);
+
+  async function saveFavorite() {
+    const base = ALL_REPORTS.find((r) => r.value === reportType)?.label ?? "Relatório";
+    const name = window.prompt("Nome do favorito:", base.slice(0, 60));
+    if (!name) return;
+    const res = await fetch("/api/reports/saved", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, reportType, period: periodId === "custom" ? "30d" : periodId }),
+    });
+    const data = await res.json();
+    if (!res.ok) { toast({ type: "error", title: data.error || "Não foi possível salvar." }); return; }
+    toast({ type: "success", title: "Favorito salvo", description: periodId === "custom" ? "Período personalizado salvo como 30 dias." : undefined });
+    void loadSaved();
+  }
+  async function removeFavorite(id: string) {
+    await fetch(`/api/reports/saved?id=${id}`, { method: "DELETE" });
+    void loadSaved();
+  }
+  function openFavorite(f: SavedReport) {
+    setReportType(f.reportType);
+    applyPeriod((PERIODS.some((p) => p.id === f.period) ? f.period : "30d") as (typeof PERIODS)[number]["id"]);
+  }
+
+  async function openDrill(row: Record<string, unknown>) {
+    const spec = DRILL[reportType];
+    if (!spec || !row[spec.key]) return;
+    const value = String(row[spec.key]);
+    const title = `${label}: ${String(row.name ?? row.product ?? row.operator ?? row.customer ?? row.category ?? value)}`;
+    setDrill({ title, rows: null });
+    const qs = new URLSearchParams({ kind: spec.kind, value, from, to });
+    const res = await fetch(`/api/reports/drill?${qs.toString()}`);
+    const data = res.ok ? await res.json() : { rows: [] };
+    setDrill({ title, rows: data.rows ?? [] });
+  }
 
   const keys = useMemo(() => visibleKeys(rows), [rows]);
   const isStatement = reportType === "income_statement";
@@ -168,12 +252,24 @@ export default function RelatoriosPage() {
         { label: "Resultado do período", value: formatCell("amount", find("Resultado do período")?.amount), strong: true },
       ];
     }
-    const out = [{ label: "Registros", value: String(rows.length) }];
+    const prevTotals = prevRows.length > 0 ? computeTotals(keys, prevRows) : {};
+    const fmtDelta = (cur: number, prev: number | undefined) => {
+      if (!compare) return undefined;
+      if (prev === undefined) return "sem dados no período anterior";
+      const d = deltaPercent(cur, prev);
+      return d === null ? "sem base de comparação" : `${d >= 0 ? "▲" : "▼"} ${Math.abs(d).toFixed(1).replace(".", ",")}% vs. período anterior`;
+    };
+    const out: Array<{ label: string; value: string; strong?: boolean; delta?: string; down?: boolean }> = [
+      { label: "Registros", value: String(rows.length), delta: fmtDelta(rows.length, prevRows.length > 0 ? prevRows.length : undefined) },
+    ];
     for (const k of totalKeys.slice(0, 3)) {
-      out.push({ label: `Total · ${columnLabel(k)}`, value: formatCell(k, totals[k]) });
+      const d = prevTotals[k] !== undefined ? deltaPercent(totals[k], prevTotals[k]) : null;
+      out.push({ label: `Total · ${columnLabel(k)}`, value: formatCell(k, totals[k]), delta: fmtDelta(totals[k], prevTotals[k]), down: d !== null && d < 0 });
     }
     return out;
-  }, [rows, isStatement, totalKeys, totals]);
+  }, [rows, prevRows, compare, keys, isStatement, totalKeys, totals]);
+
+  const chart = useMemo(() => chartSpec(reportType, rows, columnLabel), [reportType, rows]);
 
   const canExport = hasPermission("reports.export");
   const align = (k: string) => (["money", "number", "percent"].includes(columnKind(k)) ? "text-right" : "text-left");
@@ -188,6 +284,7 @@ export default function RelatoriosPage() {
     const [f, t] = periodRange(id);
     setFrom(f);
     setTo(t);
+    setPeriodId(id);
   };
 
   const doPrint = () => {
@@ -195,8 +292,33 @@ export default function RelatoriosPage() {
     setTimeout(() => window.print(), 50);
   };
 
+  const stamp = () => new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Manaus" }).format(new Date());
+
+  const doPdf = async () => {
+    await downloadReportPdf(`relatorio-${reportType}-${to}`, {
+      company: session?.company.tradeName ?? "",
+      cnpj: formatCnpjCpf(session?.company.cnpj),
+      establishment: session?.establishment.name ?? "",
+      title: label,
+      periodText,
+      emittedAt: stamp(),
+      emittedBy: session?.user.name ?? "",
+      header: exportHeader(),
+      rows: exportRows(),
+      totalRow: exportTotalRow()[0],
+      rightAligned: keys.map((k) => ["money", "number", "percent"].includes(columnKind(k))),
+      signature: SIGN.has(reportType),
+    });
+  };
+
+  const openThermal = () => {
+    setEmittedAt(stamp());
+    setThermalOpen(true);
+  };
+
   return (
-    <div className="space-y-4">
+    <div className={`space-y-4 ${isLandscape(keys.length) ? "report-wide" : ""}`}>
+      <div className="print-footer print-only">{session?.company.tradeName} · {label} · emitido em {emittedAt}</div>
       <div className="no-print flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-lg font-bold text-slate-900">Relatórios</h1>
@@ -236,9 +358,17 @@ export default function RelatoriosPage() {
               <FileSpreadsheet className="h-4 w-4" />
               Excel
             </Button>
+            <Button variant="outline" onClick={() => void doPdf()}>
+              <FileText className="h-4 w-4" />
+              Baixar PDF
+            </Button>
             <Button variant="outline" onClick={doPrint}>
               <Printer className="h-4 w-4" />
               Imprimir
+            </Button>
+            <Button variant="outline" onClick={openThermal}>
+              <Receipt className="h-4 w-4" />
+              Resumo 80 mm
             </Button>
           </div>
         )}
@@ -268,22 +398,68 @@ export default function RelatoriosPage() {
           <>
             <label className="flex flex-col gap-1 text-[11px] font-semibold text-slate-600">
               De
-              <Input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40 text-xs" />
+              <Input type="date" value={from} max={to} onChange={(e) => { setFrom(e.target.value); setPeriodId("custom"); }} className="h-9 w-40 text-xs" />
             </label>
             <label className="flex flex-col gap-1 text-[11px] font-semibold text-slate-600">
               Até
-              <Input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="h-9 w-40 text-xs" />
+              <Input type="date" value={to} min={from} onChange={(e) => { setTo(e.target.value); setPeriodId("custom"); }} className="h-9 w-40 text-xs" />
             </label>
             <div className="flex flex-wrap gap-1">
               {PERIODS.map((p) => (
-                <Button key={p.id} size="sm" variant="outline" onClick={() => applyPeriod(p.id)}>
+                <Button key={p.id} size="sm" variant={periodId === p.id ? "primary" : "outline"} onClick={() => applyPeriod(p.id)}>
                   {p.label}
                 </Button>
               ))}
             </div>
+            <label className="flex items-center gap-1.5 pb-2 text-[11px] font-semibold text-slate-600">
+              <input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)} />
+              Comparar com o período anterior
+            </label>
           </>
         )}
+        <Button size="sm" variant="outline" onClick={() => void saveFavorite()} className="mb-0.5">
+          <Star className="h-3.5 w-3.5" />
+          Salvar favorito
+        </Button>
       </div>
+
+      {saved.length > 0 && (
+        <div className="no-print flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-[11px] font-semibold text-slate-500 uppercase">Favoritos</span>
+          {saved.map((f) => (
+            <span key={f.id} className="inline-flex items-center border border-slate-200 bg-white">
+              <button type="button" className="px-2.5 py-1 font-medium text-slate-700 hover:bg-slate-50" onClick={() => openFavorite(f)}>{f.name}</button>
+              <button type="button" aria-label={`Remover favorito ${f.name}`} className="border-l border-slate-200 px-1.5 py-1 text-slate-400 hover:text-red-600" onClick={() => void removeFavorite(f.id)}><X className="h-3 w-3" /></button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <Modal open={!!drill} onClose={() => setDrill(null)} title={drill?.title ?? ""} size="lg">
+        {drill?.rows === null ? (
+          <p className="p-4 text-xs text-slate-500">Carregando…</p>
+        ) : drill && drill.rows && drill.rows.length === 0 ? (
+          <p className="p-4 text-xs text-slate-500">Nenhuma venda encontrada.</p>
+        ) : (
+          <div className="max-h-[60vh] overflow-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="sticky top-0 bg-slate-50 text-[11px] text-slate-500 uppercase">
+                <tr>{["saleNumber", "date", "product", "quantity", "total", "operator", "customer"].map((k) => <th key={k} className="px-3 py-2">{columnLabel(k)}</th>)}</tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {drill?.rows?.map((r, i) => (
+                  <tr key={i}>
+                    {["saleNumber", "date", "product", "quantity", "total", "operator", "customer"].map((k) => (
+                      <td key={k} className={`px-3 py-2 ${["quantity", "total"].includes(k) ? "text-right font-mono" : ""}`}>{formatCell(k, r[k])}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {drill?.rows && drill.rows.length >= 200 && <p className="p-3 text-[11px] text-slate-400">Mostrando as 200 vendas mais recentes.</p>}
+          </div>
+        )}
+      </Modal>
 
       {/* Cabeçalho que só aparece na impressão */}
       <div className="print-only border-b border-slate-400 pb-3">
@@ -314,9 +490,14 @@ export default function RelatoriosPage() {
               <div key={c.label} className="rounded border border-slate-200 bg-white px-4 py-3">
                 <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">{c.label}</p>
                 <p className={`mt-1 font-mono text-lg font-bold ${"strong" in c && c.strong ? "text-sky-700" : "text-slate-900"}`}>{c.value}</p>
+                {"delta" in c && c.delta && (
+                  <p className={`mt-0.5 text-[10px] ${"down" in c && c.down ? "text-red-600" : "text-emerald-700"}`}>{c.delta}</p>
+                )}
               </div>
             ))}
           </div>
+
+          {chart && <ReportChart spec={chart} />}
 
           <div className="overflow-x-auto rounded border border-slate-200 bg-white">
             <table className="report-table w-full min-w-[560px] text-left text-xs">
@@ -342,7 +523,12 @@ export default function RelatoriosPage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {sorted.map((r, i) => (
-                  <tr key={i} className={r._bold ? "bg-slate-50 font-bold" : ""}>
+                  <tr
+                    key={i}
+                    className={`${r._bold ? "bg-slate-50 font-bold" : ""} ${DRILL[reportType] ? "cursor-pointer hover:bg-sky-50" : ""}`}
+                    onClick={DRILL[reportType] ? () => void openDrill(r) : undefined}
+                    title={DRILL[reportType] ? "Ver as vendas desta linha" : undefined}
+                  >
                     {keys.map((k) => {
                       const v = r[k];
                       const neg = typeof v === "number" && v < 0 && columnKind(k) === "money";
@@ -371,8 +557,36 @@ export default function RelatoriosPage() {
               )}
             </table>
           </div>
+          {SIGN.has(reportType) && (
+            <div className="print-signature hidden">
+              <div>Responsável pela contagem</div>
+              <div>Conferido por</div>
+            </div>
+          )}
         </>
       )}
+
+      <Modal
+        open={thermalOpen}
+        onClose={() => setThermalOpen(false)}
+        title="Resumo em 80 mm"
+        size="sm"
+        footer={<><Button variant="outline" onClick={() => setThermalOpen(false)}>Fechar</Button><Button variant="warning" onClick={() => window.print()}><Printer className="h-3.5 w-3.5" />Imprimir / salvar PDF</Button></>}
+      >
+        <ReportThermal
+          company={session?.company.tradeName ?? ""}
+          cnpj={formatCnpjCpf(session?.company.cnpj)}
+          establishment={session?.establishment.name ?? ""}
+          title={label}
+          periodText={periodText}
+          emittedAt={emittedAt}
+          emittedBy={session?.user.name ?? ""}
+          keys={keys}
+          rows={sorted}
+          totals={showTotals ? totals : {}}
+          signature={SIGN.has(reportType)}
+        />
+      </Modal>
     </div>
   );
 }

@@ -173,6 +173,10 @@ export async function PATCH(
           body?.trackStock !== undefined
             ? Boolean(body.trackStock)
             : existing.trackStock,
+        expiryDate:
+          body?.expiryDate !== undefined
+            ? /^\d{4}-\d{2}-\d{2}$/.test(String(body.expiryDate)) ? String(body.expiryDate) : null
+            : existing.expiryDate,
         status: body?.status !== undefined ? String(body.status) : existing.status,
         updatedAt: new Date(),
       })

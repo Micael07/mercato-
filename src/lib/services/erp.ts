@@ -55,7 +55,10 @@ export async function moveStockInTx(
       | "adjustment_pos"
       | "adjustment_neg"
       | "transfer"
-      | "inventory";
+      | "inventory"
+      | "loss_expired"
+      | "loss_breakage"
+      | "loss_theft";
     deltaQuantity: number; // positive adds stock, negative deducts stock
     unitCost?: number;
     originDocument?: string;
@@ -166,7 +169,10 @@ export async function moveStockTx(params: {
     | "adjustment_pos"
     | "adjustment_neg"
     | "transfer"
-    | "inventory";
+    | "inventory"
+    | "loss_expired"
+    | "loss_breakage"
+    | "loss_theft";
   quantity: number;
   unitCost?: number;
   originDocument?: string;
@@ -181,7 +187,8 @@ export async function moveStockTx(params: {
   const isOut =
     params.type === "manual_out" ||
     params.type === "sale_out" ||
-    params.type === "adjustment_neg";
+    params.type === "adjustment_neg" ||
+    params.type.startsWith("loss_");
   const delta = isOut ? -params.quantity : params.quantity;
 
   return db.transaction(async (tx) => {

@@ -42,6 +42,9 @@ const TYPE_LABELS: Record<string, string> = {
   adjustment_neg: "Ajuste (-)",
   transfer: "Transferência",
   inventory: "Inventário",
+  loss_expired: "Perda (vencimento)",
+  loss_breakage: "Perda (quebra/avaria)",
+  loss_theft: "Perda (extravio/furto)",
 };
 
 export default function EstoquePage() {
@@ -61,6 +64,7 @@ export default function EstoquePage() {
     type: "manual_in",
     quantity: "1",
     justification: "",
+    expiryDate: "",
   });
   const [submitting, setSubmitting] = useState(false);
 
@@ -108,7 +112,7 @@ export default function EstoquePage() {
         description: `Novo saldo: ${data.newBalance}`,
       });
       setModalOpen(false);
-      setForm({ productId: "", type: "manual_in", quantity: "1", justification: "" });
+      setForm({ productId: "", type: "manual_in", quantity: "1", justification: "", expiryDate: "" });
       load();
     } finally {
       setSubmitting(false);
@@ -249,6 +253,9 @@ export default function EstoquePage() {
             <option value="adjustment_pos">Ajuste positivo</option>
             <option value="adjustment_neg">Ajuste negativo</option>
             <option value="inventory">Inventário</option>
+            <option value="loss_expired">Perda por vencimento</option>
+            <option value="loss_breakage">Quebra / avaria</option>
+            <option value="loss_theft">Extravio / furto</option>
           </Select>
         }
       />
@@ -284,6 +291,9 @@ export default function EstoquePage() {
                 <option value="manual_out">Saída manual (-)</option>
                 <option value="adjustment_pos">Ajuste positivo (+)</option>
                 <option value="adjustment_neg">Ajuste negativo (-)</option>
+                <option value="loss_expired">Perda por vencimento (-)</option>
+                <option value="loss_breakage">Quebra / avaria (-)</option>
+                <option value="loss_theft">Extravio / furto (-)</option>
               </Select>
             </Field>
             <Field label="Quantidade" required>
@@ -297,6 +307,11 @@ export default function EstoquePage() {
               />
             </Field>
           </div>
+          {(form.type === "manual_in" || form.type === "adjustment_pos") && (
+            <Field label="Validade do lote que entrou (opcional)" hint="Atualiza a validade mais próxima do produto, usada no relatório de vencimentos.">
+              <Input type="date" value={form.expiryDate} onChange={(e) => setForm({ ...form, expiryDate: e.target.value })} />
+            </Field>
+          )}
           <Field label="Justificativa obrigatória" required>
             <Textarea
               required

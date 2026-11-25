@@ -331,6 +331,15 @@ export default function ConfiguracoesPage() {
           </div>
         </Panel>
 
+        <Panel title="Backup dos seus dados">
+          <p className="mb-3 text-xs text-slate-600">
+            Baixe uma cópia completa dos dados da empresa (produtos, estoque, vendas, compras, financeiro, caixa, clientes e usuários) em planilhas CSV dentro de um arquivo ZIP. Senhas nunca fazem parte do arquivo. Guarde em local seguro.
+          </p>
+          <a href="/api/company/export" download className="erp-button erp-button--outline erp-button--md inline-flex items-center">
+            Baixar backup completo (ZIP)
+          </a>
+        </Panel>
+
         <Panel title="Formas de Pagamento Ativas" noPadding>
           <ul className="divide-y divide-slate-100 text-xs">
             {paymentMethods.map((pm) => (

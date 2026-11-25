@@ -50,6 +50,7 @@ interface ProductRow {
   maxStock: number;
   currentStock: number;
   location: string | null;
+  expiryDate?: string | null;
   mainSupplierId: string | null;
   supplierName: string | null;
   allowFractional: boolean;
@@ -77,6 +78,7 @@ const EMPTY_FORM = {
   maxStock: "50",
   initialStock: "0",
   location: "",
+  expiryDate: "",
   allowFractional: false,
   trackStock: true,
   priceReason: "",
@@ -187,6 +189,7 @@ export default function ProdutosPage() {
       maxStock: String(p.maxStock),
       initialStock: "0",
       location: p.location ?? "",
+      expiryDate: p.expiryDate ?? "",
       allowFractional: p.allowFractional,
       trackStock: p.trackStock,
       priceReason: "",
@@ -700,6 +703,10 @@ export default function ProdutosPage() {
               />
             </Field>
           )}
+
+          <Field label="Validade mais próxima do estoque" hint="Opcional. Aparece no relatório de produtos vencidos e a vencer.">
+            <Input type="date" value={form.expiryDate} onChange={(e) => setForm({ ...form, expiryDate: e.target.value })} />
+          </Field>
 
           <div className="grid grid-cols-3 gap-3">
             <Field label="Estoque Mínimo">

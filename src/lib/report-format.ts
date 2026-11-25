@@ -56,6 +56,25 @@ const COLUMNS: Record<string, ColumnSpec> = {
   previousBalance: { label: "Saldo anterior", kind: "number" },
   newBalance: { label: "Novo saldo", kind: "number" },
   percent: { label: "% da receita", kind: "percent" },
+  terminal: { label: "Terminal", kind: "text" },
+  opening: { label: "Abertura (troco)", kind: "money", sum: true },
+  cashSales: { label: "Vendas em dinheiro", kind: "money", sum: true },
+  otherSales: { label: "Vendas (outras formas)", kind: "money", sum: true },
+  supply: { label: "Suprimentos", kind: "money", sum: true },
+  bleed: { label: "Sangrias", kind: "money", sum: true },
+  expected: { label: "Esperado em caixa", kind: "money", sum: true },
+  counted: { label: "Contado", kind: "money", sum: true },
+  difference: { label: "Diferença", kind: "money", sum: true },
+  abcClass: { label: "Classe", kind: "text" },
+  cumulativePercent: { label: "% acumulado", kind: "percent" },
+  avgDaily: { label: "Venda média/dia", kind: "number" },
+  coverDays: { label: "Cobertura (dias)", kind: "number" },
+  suggestedQty: { label: "Sugestão de compra", kind: "number", sum: true },
+  estimatedCost: { label: "Custo estimado", kind: "money", sum: true },
+  expiryDate: { label: "Validade", kind: "date" },
+  daysToExpire: { label: "Dias p/ vencer", kind: "number" },
+  lossValue: { label: "Valor da perda (custo)", kind: "money", sum: true },
+  justification: { label: "Justificativa", kind: "text" },
 };
 
 const VALUES: Record<string, string> = {
@@ -85,6 +104,9 @@ const VALUES: Record<string, string> = {
   adjustment_pos: "Ajuste positivo",
   adjustment_neg: "Ajuste negativo",
   inventory: "Inventário",
+  loss_expired: "Perda por vencimento",
+  loss_breakage: "Quebra / avaria",
+  loss_theft: "Extravio / furto",
 };
 
 export function columnLabel(key: string): string {

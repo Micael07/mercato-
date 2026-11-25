@@ -19,6 +19,7 @@ import {
   users,
 } from "@/db";
 import { requireApiAuth } from "@/lib/auth";
+import { EXTRA_REPORT_TYPES, buildExtraReport } from "@/lib/reports-extra";
 import { roundMoney, toNumber } from "@/lib/format";
 import { addDaysStr, endOfDayUtc, isDateStr, startOfDayUtc, todayInTz } from "@/lib/dates";
 
@@ -64,6 +65,19 @@ export async function GET(req: Request) {
       { error: "Sem permissão para visualizar custos e margem." },
       { status: 403 }
     );
+  }
+
+  if (EXTRA_REPORT_TYPES.has(type)) {
+    const rows = await buildExtraReport(type, {
+      companyId: ctx.company.id,
+      establishmentId: ctx.establishment.id,
+      from: fromDate,
+      to: toDate,
+      fromStr: from,
+      toStr: to,
+      canViewCost,
+    });
+    return NextResponse.json({ rows });
   }
 
   const companySales = await db

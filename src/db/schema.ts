@@ -403,6 +403,8 @@ export const products = pgTable(
     }),
     imageUrl: text("image_url"),
     allowFractional: boolean("allow_fractional").notNull().default(false),
+    // Validade mais próxima do estoque (controle simples, sem lote por lote)
+    expiryDate: date("expiry_date"),
     trackStock: boolean("track_stock").notNull().default(true),
     status: varchar("status", { length: 20 }).notNull().default("active"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -900,4 +902,18 @@ export const auditLogs = pgTable(
     index("audit_logs_company_date_idx").on(table.companyId, table.createdAt),
     index("audit_logs_entity_idx").on(table.entity, table.entityId),
   ]
+);
+
+export const savedReports = pgTable(
+  "saved_reports",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 80 }).notNull(),
+    reportType: varchar("report_type", { length: 40 }).notNull(),
+    period: varchar("period", { length: 20 }).notNull().default("30d"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("saved_reports_user_idx").on(table.companyId, table.userId)]
 );

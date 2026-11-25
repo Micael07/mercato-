@@ -381,6 +381,12 @@ export default function PlataformaPage() {
               <p className="text-[10px] text-slate-400">{selected.userCount} usuário(s) · {selected.establishmentCount} estabelecimento(s) · último acesso {selected.lastLoginAt ? formatDateTime(selected.lastLoginAt) : "nunca"}</p>
             </section>
 
+            <section className="space-y-2 border-t border-slate-100 pt-4">
+              <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Backup dos dados do cliente</h4>
+              <p className="text-slate-500">ZIP com todas as tabelas da empresa em CSV, sem senhas. Use para entregar ao cliente que pedir ou cancelar.</p>
+              <a href={`/api/platform/companies/${selected.id}/export`} download className="erp-button erp-button--outline erp-button--sm inline-flex items-center">Baixar backup (ZIP)</a>
+            </section>
+
             <section className="space-y-3 border-t border-slate-100 pt-4">
               <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Limite e autorização de usuários</h4>
               {seats && (

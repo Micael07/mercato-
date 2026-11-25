@@ -69,7 +69,14 @@ export async function POST(req: Request) {
       | "manual_in"
       | "manual_out"
       | "adjustment_pos"
-      | "adjustment_neg";
+      | "adjustment_neg"
+      | "loss_expired"
+      | "loss_breakage"
+      | "loss_theft";
+    const ALLOWED = ["manual_in", "manual_out", "adjustment_pos", "adjustment_neg", "loss_expired", "loss_breakage", "loss_theft"];
+    if (!ALLOWED.includes(type)) {
+      return NextResponse.json({ error: "Tipo de movimentação inválido." }, { status: 400 });
+    }
     const quantity = toNumber(body?.quantity ?? 0);
     const justification = String(body?.justification ?? "").trim();
 
@@ -91,6 +98,22 @@ export async function POST(req: Request) {
       userName: ctx.user.name,
       justification,
     });
+
+    // Validade do lote que entrou: vale como "mais próxima" se o estoque estava vazio
+    // ou se for anterior à já cadastrada.
+    const expiry = String(body?.expiryDate ?? "");
+    if ((type === "manual_in" || type === "adjustment_pos") && /^\d{4}-\d{2}-\d{2}$/.test(expiry)) {
+      const [p0] = await db
+        .select({ expiryDate: products.expiryDate })
+        .from(products)
+        .where(and(eq(products.id, productId), eq(products.companyId, ctx.company.id)))
+        .limit(1);
+      const keepOld = p0?.expiryDate && result.previousBalance > 0 && p0.expiryDate <= expiry;
+      if (p0 && !keepOld) {
+        await db.update(products).set({ expiryDate: expiry, updatedAt: new Date() })
+          .where(and(eq(products.id, productId), eq(products.companyId, ctx.company.id)));
+      }
+    }
 
     return NextResponse.json({ ok: true, ...result }, { status: 201 });
   } catch (err) {

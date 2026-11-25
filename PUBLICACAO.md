@@ -29,3 +29,11 @@
 - CPF e nascimento ficam criptografados (AES-256-GCM, chave derivada do AUTH_SECRET); só o ADM master os lê, e cada consulta é auditada. Trocar o AUTH_SECRET torna esses dados ilegíveis (reinformar).
 - Usuários criados antes da migração 008 têm só o hash de recuperação: o CPF aparece depois que o ADM ou o próprio usuário informar de novo.
 - Trocar o nome recalcula a recuperação automaticamente quando o CPF está legível.
+
+## Migração 009 — validade, perdas e relatórios favoritos
+- Roda sozinha no build (adiciona `products.expiry_date` e a tabela `saved_reports`).
+- Novos relatórios: fechamento de caixa, curva ABC, sugestão de compra, vencimentos e perdas.
+- PDF direto, resumo térmico 80 mm, comparativo com período anterior, gráficos e detalhe ao tocar na linha.
+- Backup: Configurações → "Baixar backup completo" (ZIP de CSVs, sem senhas). O administrador master também baixa o de cada empresa.
+- Lembrete de contas a pagar aparece só para administrador e gerente.
+- Limitação: a validade é uma data por produto (a mais próxima), não por lote.

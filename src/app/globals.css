@@ -252,12 +252,21 @@ select.erp-input { padding-right: 23px; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
 /* Só aparece na impressão (cabeçalho dos relatórios) */
 .print-only { display: none; }
+.print-signature { display: none; }
+.print-footer { display: none; }
 @media print {
   .no-print { display: none !important; }
   .print-only { display: block !important; }
+  .print-footer { display: block !important; }
   .report-table { min-width: 0 !important; font-size: 10px !important; }
   .report-table tr { break-inside: avoid; }
-  @page { margin: 12mm; }
+  @page { margin: 12mm 12mm 16mm; @bottom-right { content: "Página " counter(page) " de " counter(pages); font-size: 9px; color: #555; } }
+  @page wide { size: A4 landscape; margin: 12mm 12mm 16mm; @bottom-right { content: "Página " counter(page) " de " counter(pages); font-size: 9px; color: #555; } }
+  .report-wide { page: wide; }
+  .print-footer { position: fixed; bottom: 0; left: 0; font-size: 9px; color: #555; }
+  .print-signature { display: flex !important; justify-content: space-between; gap: 24mm; margin-top: 18mm; break-inside: avoid; font-size: 10px; }
+  .print-signature > div { flex: 1; border-top: 1px solid #000; padding-top: 2px; text-align: center; }
+  .report-chart { break-inside: avoid; }
   body, .erp-shell, .erp-page-body { background: #fff !important; color: #000 !important; }
   .erp-page-body { padding: 0 !important; }
   .erp-dialog-backdrop:has(.thermal-receipt) { position: absolute; inset: 0 auto auto 0; display: block; width: 80mm; padding: 0; background: #fff; }

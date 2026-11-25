@@ -10,6 +10,7 @@ import {
   Settings, FileSearch, KeyRound, LifeBuoy, ChevronDown, ChevronRight, LogOut, Search, UserRound, Store,
 } from "lucide-react";
 import { useSession } from "@/components/session-provider";
+import { PayablesReminder } from "@/components/payables-reminder";
 import { useToast } from "@/components/ui/toast";
 import { ConfirmDialog, Input, Modal } from "@/components/ui/primitives";
 import { formatCnpjCpf, formatDate } from "@/lib/format";
@@ -166,6 +167,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </p>
         );
       })()}
+      <PayablesReminder />
       {session.user.recoveryConfigured === false && !session.isPlatformAdmin && (
         <p role="status" className="no-print border-b border-sky-200 bg-sky-50 px-6 py-2 text-[11px] text-sky-800">
           Cadastre seus dados de recuperação (CPF e nascimento) para poder redefinir a senha sozinho. <Link href="/trocar-senha" className="font-semibold underline">Completar agora</Link>

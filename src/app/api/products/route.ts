@@ -56,6 +56,7 @@ export async function GET(req: Request) {
       minStock: products.minStock,
       maxStock: products.maxStock,
       location: products.location,
+      expiryDate: products.expiryDate,
       mainSupplierId: products.mainSupplierId,
       supplierName: suppliers.tradeName,
       imageUrl: products.imageUrl,
@@ -100,6 +101,7 @@ export async function GET(req: Request) {
       maxStock: toNumber(r.maxStock),
       currentStock: qty,
       location: r.location,
+      expiryDate: r.expiryDate,
       mainSupplierId: r.mainSupplierId,
       supplierName: r.supplierName,
       imageUrl: r.imageUrl,
@@ -198,6 +200,7 @@ export async function POST(req: Request) {
           mainSupplierId: body?.mainSupplierId || null,
           imageUrl: body?.imageUrl || null,
           allowFractional: Boolean(body?.allowFractional ?? false),
+          expiryDate: /^\d{4}-\d{2}-\d{2}$/.test(String(body?.expiryDate ?? "")) ? String(body.expiryDate) : null,
           trackStock: body?.trackStock !== false,
           status: "active",
         })
