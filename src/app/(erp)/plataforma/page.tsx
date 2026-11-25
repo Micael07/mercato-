@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Ban, CalendarPlus, Copy, KeyRound, Plus, ShieldCheck, Unlock } from "lucide-react";
 import { useSession } from "@/components/session-provider";
@@ -277,7 +278,7 @@ export default function PlataformaPage() {
           <h1 className="text-lg font-bold text-slate-900">Clientes e licenças</h1>
           <p className="text-xs text-slate-500">Somente você libera, renova e bloqueia o acesso das empresas ao Mercato</p>
         </div>
-        <Button onClick={() => setNewOpen(true)}><Plus className="h-4 w-4" />Novo cliente</Button>
+        <div className="flex gap-2"><Link href="/plataforma/usuarios"><Button variant="outline">Todos os usuários</Button></Link><Button onClick={() => setNewOpen(true)}><Plus className="h-4 w-4" />Novo cliente</Button></div>
       </div>
 
       {counts.pending > 0 && (

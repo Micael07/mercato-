@@ -86,7 +86,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const matching = (entry: NavEntry) => entry.href === "/" ? pathname === "/" : pathname === entry.href || pathname.startsWith(`${entry.href}/`);
   const activeModule = visibleModules.find((module) => module.entries.some(matching));
   const activeEntry = entries.find(matching);
-  const currentLabel = pathname === "/configuracoes/publicacao" ? "Publicação e diagnóstico" : pathname === "/plataforma" ? "Clientes e licenças" : pathname === "/ajuda" ? "Ajuda rápida" : activeEntry?.label || "Sistema";
+  const currentLabel = pathname === "/configuracoes/publicacao" ? "Publicação e diagnóstico" : pathname === "/plataforma/usuarios" ? "Todos os usuários" : pathname === "/plataforma" ? "Clientes e licenças" : pathname === "/ajuda" ? "Ajuda rápida" : activeEntry?.label || "Sistema";
   const companyEntry = session.availableCompanies.find((company) => company.companyId === session.company.id);
   const role = ROLE_DEFINITIONS[session.membership.roleCode]?.name || session.membership.roleCode;
   const quickEntries = entries.filter((entry) => entry.label.toLocaleLowerCase("pt-BR").includes(quickQuery.toLocaleLowerCase("pt-BR")));

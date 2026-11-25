@@ -15,3 +15,10 @@
 - **Atenção:** trocar o AUTH_SECRET invalida os dados de recuperação já cadastrados (os usuários precisam recadastrar CPF/nascimento em Alterar senha).
 - Usuários antigos veem um aviso para cadastrar CPF e nascimento.
 - **Lembrete de pagamento:** só administrador e gerente veem, a 7 dias do vencimento (vermelho a partir de 3). Contato exibido vem de NEXT_PUBLIC_SUPPORT_CONTACT. No painel /plataforma há "Copiar lembrete de cobrança" para enviar ao cliente.
+
+## Painel do ADM: todos os usuários
+
+- /plataforma/usuarios lista os usuários de todas as empresas (busca, filtro por empresa e situação).
+- O ADM corrige nome, e-mail, telefone, cadastra/substitui CPF e nascimento (nunca exibidos), gera senha provisória, desconecta, bloqueia (todas as empresas) e ajusta perfil/bloqueio por empresa. Tudo fica na auditoria.
+- Trocar o nome limpa a recuperação por CPF (o nome faz parte da verificação), a menos que CPF e nascimento sejam informados junto.
+- A conta do ADM master não pode ser bloqueada nem ter o e-mail alterado por essa tela.
