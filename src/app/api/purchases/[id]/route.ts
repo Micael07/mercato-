@@ -29,6 +29,13 @@ export async function GET(
       supplierId: purchaseOrders.supplierId,
       supplierName: suppliers.tradeName,
       supplierLegalName: suppliers.legalName,
+      supplierDocument: suppliers.document,
+      supplierContact: suppliers.contactName,
+      supplierPhone: suppliers.phone,
+      supplierEmail: suppliers.email,
+      supplierAddress: suppliers.address,
+      supplierCity: suppliers.city,
+      supplierState: suppliers.state,
       status: purchaseOrders.status,
       subtotal: purchaseOrders.subtotal,
       discount: purchaseOrders.discount,
@@ -38,10 +45,12 @@ export async function GET(
       paymentTerms: purchaseOrders.paymentTerms,
       expectedDelivery: purchaseOrders.expectedDelivery,
       notes: purchaseOrders.notes,
+      createdByName: users.name,
       createdAt: purchaseOrders.createdAt,
     })
     .from(purchaseOrders)
     .innerJoin(suppliers, eq(purchaseOrders.supplierId, suppliers.id))
+    .leftJoin(users, eq(purchaseOrders.createdBy, users.id))
     .where(
       and(eq(purchaseOrders.id, id), eq(purchaseOrders.companyId, ctx.company.id))
     )
@@ -82,6 +91,13 @@ export async function GET(
     .orderBy(desc(purchaseReceipts.receivedAt));
 
   return NextResponse.json({
+    header: {
+      companyName: ctx.company.tradeName || ctx.company.legalName,
+      companyCnpj: ctx.company.cnpj,
+      establishmentName: ctx.establishment.name,
+      establishmentAddress: ctx.establishment.address,
+      establishmentPhone: ctx.establishment.phone,
+    },
     order: {
       ...po,
       subtotal: toNumber(po.subtotal),
@@ -116,6 +132,26 @@ export async function PATCH(
   const allowed = ["draft", "pending_approval", "approved", "sent", "cancelled"];
   if (!allowed.includes(status)) {
     return NextResponse.json({ error: "Status inválido." }, { status: 400 });
+  }
+
+  const [current] = await db
+    .select({ status: purchaseOrders.status })
+    .from(purchaseOrders)
+    .where(and(eq(purchaseOrders.id, id), eq(purchaseOrders.companyId, ctx.company.id)))
+    .limit(1);
+  if (!current) {
+    return NextResponse.json({ error: "Pedido não encontrado." }, { status: 404 });
+  }
+  if (["received", "partially_received", "cancelled"].includes(current.status)) {
+    return NextResponse.json(
+      {
+        error:
+          current.status === "cancelled"
+            ? "Pedido já cancelado."
+            : "Pedido com mercadoria recebida não pode mudar de status.",
+      },
+      { status: 409 }
+    );
   }
 
   const [updated] = await db

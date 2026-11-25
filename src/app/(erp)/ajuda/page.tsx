@@ -23,6 +23,8 @@ const GROUPS: Group[] = [
     id: "estoque", title: "Produtos e estoque", items: [
       { q: "Como cadastro um produto?", a: "Produtos → Cadastro de produtos → Novo. Informe nome, unidade, preço de venda e, se quiser, código de barras. O preço de custo só aparece para quem tem permissão." },
       { q: "Como dou entrada de mercadoria?", a: "Duas formas: receba um pedido em Compras → Pedidos de compra (atualiza estoque e financeiro) ou lance uma entrada manual em Produtos → Movimentação de estoque." },
+      { q: "Como cadastro um fornecedor pelo CNPJ?", a: "Em Fornecedores → Novo Fornecedor, digite o CNPJ. Ao completar os 14 números, o sistema busca razão social, fantasia, endereço, telefone e e-mail na base pública e preenche o formulário. Confira os dados e complete contato e condição de pagamento. Se a consulta falhar, preencha à mão." },
+      { q: "Como imprimo um pedido de compra?", a: "Em Compras, use o ícone de impressora na linha do pedido ou o botão Imprimir dentro do pedido. Também dá para Salvar e imprimir ao criar. O formato é o mesmo do comprovante de venda (80 mm) e também gera PDF." },
       { q: "O saldo está errado. Como corrijo?", a: "Use um ajuste em Movimentação de estoque, ou faça um Inventário para contar e aprovar as diferenças. Todo ajuste fica registrado com usuário e data." },
       { q: "Posso vender com estoque zerado?", a: "Depende da configuração “permitir estoque negativo”, em Configurações. Se estiver desligada, o PDV bloqueia a quantidade acima do saldo." },
     ],

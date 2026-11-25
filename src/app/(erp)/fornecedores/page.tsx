@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
-import { Edit3, Plus, Search } from "lucide-react";
+import { CheckCircle2, Edit3, Loader2, Plus, Search, TriangleAlert } from "lucide-react";
 import { useSession } from "@/components/session-provider";
 import { useToast } from "@/components/ui/toast";
 import { formatCnpjCpf } from "@/lib/format";
@@ -27,6 +27,8 @@ interface SupplierRow {
   phone: string | null;
   whatsapp: string | null;
   email: string | null;
+  address: string | null;
+  zipCode: string | null;
   city: string | null;
   state: string | null;
   paymentTerms: string | null;
@@ -43,6 +45,8 @@ const EMPTY_FORM = {
   phone: "",
   whatsapp: "",
   email: "",
+  zipCode: "",
+  address: "",
   city: "",
   state: "",
   paymentTerms: "",
@@ -59,6 +63,81 @@ export default function FornecedoresPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
+  const [lookup, setLookup] = useState<{
+    state: "idle" | "loading" | "ok" | "warn" | "error";
+    message: string;
+  }>({ state: "idle", message: "" });
+  const lastLookup = React.useRef("");
+
+  const maskDocument = (value: string) => {
+    const d = value.replace(/\D/g, "").slice(0, 14);
+    if (d.length <= 11) {
+      return d
+        .replace(/^(\d{3})(\d)/, "$1.$2")
+        .replace(/^(\d{3})\.(\d{3})(\d)/, "$1.$2.$3")
+        .replace(/\.(\d{3})(\d)/, ".$1-$2");
+    }
+    return d
+      .replace(/^(\d{2})(\d)/, "$1.$2")
+      .replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3")
+      .replace(/\.(\d{3})(\d)/, ".$1/$2")
+      .replace(/(\d{4})(\d)/, "$1-$2");
+  };
+
+  const openDrawer = (next: typeof EMPTY_FORM) => {
+    lastLookup.current = "";
+    setLookup({ state: "idle", message: "" });
+    setForm(next);
+    setDrawerOpen(true);
+  };
+
+  const fetchCnpj = async (raw: string) => {
+    const digits = raw.replace(/\D/g, "");
+    if (digits.length !== 14) return;
+    lastLookup.current = digits;
+    setLookup({ state: "loading", message: "Consultando CNPJ..." });
+    try {
+      const res = await fetch(`/api/suppliers/cnpj/${digits}`);
+      const body = await res.json();
+      if (lastLookup.current !== digits) return;
+      if (!res.ok) {
+        setLookup({ state: "error", message: body.error ?? "Falha na consulta." });
+        return;
+      }
+      const d = body.data;
+      setForm((f) => ({
+        ...f,
+        personType: "PJ",
+        document: maskDocument(digits),
+        legalName: d.legalName || f.legalName,
+        tradeName: d.tradeName || f.tradeName,
+        phone: f.phone || d.phone || "",
+        email: f.email || d.email || "",
+        zipCode: d.zipCode || f.zipCode,
+        address: d.address || f.address,
+        city: d.city || f.city,
+        state: d.state || f.state,
+      }));
+      if (body.existing && !form.id) {
+        setLookup({
+          state: "warn",
+          message: `Este CNPJ já está cadastrado como "${body.existing.legalName}".`,
+        });
+      } else if (!d.active) {
+        setLookup({
+          state: "warn",
+          message: `Dados preenchidos, mas a situação cadastral é ${d.situation || "não ativa"}. Confira antes de comprar.`,
+        });
+      } else {
+        setLookup({
+          state: "ok",
+          message: "Dados preenchidos pela Receita. Confira e complete o que faltar.",
+        });
+      }
+    } catch {
+      setLookup({ state: "error", message: "Sem conexão para consultar o CNPJ." });
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -166,22 +245,23 @@ export default function FornecedoresPage() {
             size="sm"
             variant="ghost"
             onClick={() => {
-              setForm({
+              openDrawer({
                 id: r.id,
                 personType: r.personType,
-                document: r.document ?? "",
+                document: r.document ? maskDocument(r.document) : "",
                 legalName: r.legalName,
                 tradeName: r.tradeName ?? "",
                 contactName: r.contactName ?? "",
                 phone: r.phone ?? "",
                 whatsapp: r.whatsapp ?? "",
                 email: r.email ?? "",
+                zipCode: r.zipCode ?? "",
+                address: r.address ?? "",
                 city: r.city ?? "",
                 state: r.state ?? "",
                 paymentTerms: r.paymentTerms ?? "",
                 notes: "",
               });
-              setDrawerOpen(true);
             }}
           >
             <Edit3 className="h-3.5 w-3.5" />
@@ -201,10 +281,7 @@ export default function FornecedoresPage() {
         </div>
         {hasPermission("purchases.manage") && (
           <Button
-            onClick={() => {
-              setForm(EMPTY_FORM);
-              setDrawerOpen(true);
-            }}
+            onClick={() => openDrawer(EMPTY_FORM)}
           >
             <Plus className="h-4 w-4" />
             Novo Fornecedor
@@ -257,14 +334,51 @@ export default function FornecedoresPage() {
               </Select>
             </Field>
             <div className="col-span-2">
-              <Field label="CNPJ / CPF">
-                <Input
-                  value={form.document}
-                  onChange={(e) => setForm({ ...form, document: e.target.value })}
-                />
+              <Field label="CNPJ / CPF" hint={form.personType === "PJ" && !form.id ? "Digite o CNPJ e os dados são preenchidos sozinhos." : undefined}>
+                <div className="flex gap-2">
+                  <Input
+                    inputMode="numeric"
+                    value={form.document}
+                    placeholder={form.personType === "PJ" ? "00.000.000/0000-00" : "000.000.000-00"}
+                    onChange={(e) => {
+                      const masked = maskDocument(e.target.value);
+                      setForm({ ...form, document: masked });
+                      if (lookup.state !== "idle") setLookup({ state: "idle", message: "" });
+                      if (form.personType === "PJ" && masked.replace(/\D/g, "").length === 14 && !form.id) {
+                        void fetchCnpj(masked);
+                      }
+                    }}
+                  />
+                  {form.personType === "PJ" && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={form.document.replace(/\D/g, "").length !== 14 || lookup.state === "loading"}
+                      onClick={() => void fetchCnpj(form.document)}
+                    >
+                      {lookup.state === "loading" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+                      Buscar
+                    </Button>
+                  )}
+                </div>
               </Field>
             </div>
           </div>
+          {lookup.state !== "idle" && (
+            <p
+              role="status"
+              className={`flex items-start gap-1.5 rounded border px-2.5 py-2 text-xs ${
+                lookup.state === "ok"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                  : lookup.state === "loading"
+                    ? "border-slate-200 bg-slate-50 text-slate-600"
+                    : "border-amber-200 bg-amber-50 text-amber-800"
+              }`}
+            >
+              {lookup.state === "ok" ? <CheckCircle2 className="mt-px h-3.5 w-3.5 shrink-0" /> : lookup.state === "loading" ? <Loader2 className="mt-px h-3.5 w-3.5 shrink-0 animate-spin" /> : <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0" />}
+              {lookup.message}
+            </p>
+          )}
           <Field label="Razão Social / Nome" required>
             <Input
               required
@@ -311,6 +425,24 @@ export default function FornecedoresPage() {
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
               />
             </Field>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <Field label="CEP">
+              <Input
+                inputMode="numeric"
+                value={form.zipCode}
+                onChange={(e) => setForm({ ...form, zipCode: e.target.value })}
+              />
+            </Field>
+            <div className="col-span-2">
+              <Field label="Endereço">
+                <Input
+                  value={form.address}
+                  onChange={(e) => setForm({ ...form, address: e.target.value })}
+                  placeholder="Rua, número, bairro"
+                />
+              </Field>
+            </div>
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-2">

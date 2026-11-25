@@ -45,6 +45,21 @@ export async function POST(req: Request) {
     );
   }
 
+  const documentDigits = body?.document ? String(body.document).replace(/\D/g, "") : "";
+  if (documentDigits) {
+    const [dup] = await db
+      .select({ id: suppliers.id })
+      .from(suppliers)
+      .where(and(eq(suppliers.companyId, ctx.company.id), eq(suppliers.document, documentDigits)))
+      .limit(1);
+    if (dup) {
+      return NextResponse.json(
+        { error: "Já existe um fornecedor cadastrado com este CNPJ/CPF." },
+        { status: 409 }
+      );
+    }
+  }
+
   const [item] = await db
     .insert(suppliers)
     .values({
@@ -97,13 +112,16 @@ export async function PATCH(req: Request) {
     .set({
       legalName: body?.legalName ? String(body.legalName).trim() : undefined,
       tradeName: body?.tradeName !== undefined ? body.tradeName : undefined,
-      document: body?.document !== undefined ? body.document : undefined,
+      document: body?.document !== undefined ? (body.document ? String(body.document).replace(/\D/g, "") : null) : undefined,
       contactName: body?.contactName !== undefined ? body.contactName : undefined,
       phone: body?.phone !== undefined ? body.phone : undefined,
       whatsapp: body?.whatsapp !== undefined ? body.whatsapp : undefined,
       email: body?.email !== undefined ? body.email : undefined,
+      address: body?.address !== undefined ? body.address : undefined,
+      zipCode: body?.zipCode !== undefined ? body.zipCode : undefined,
       city: body?.city !== undefined ? body.city : undefined,
       state: body?.state !== undefined ? body.state : undefined,
+      notes: body?.notes !== undefined ? body.notes : undefined,
       paymentTerms: body?.paymentTerms !== undefined ? body.paymentTerms : undefined,
       status: body?.status !== undefined ? body.status : undefined,
       updatedAt: new Date(),
