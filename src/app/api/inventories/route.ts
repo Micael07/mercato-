@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   db,
   inventories,
@@ -26,6 +26,8 @@ export async function GET(req: Request) {
       closedAt: inventories.closedAt,
       openedByName: users.name,
       notes: inventories.notes,
+      totalItems: sql<number>`(select count(*)::int from inventory_items ii where ii.inventory_id = ${inventories.id})`,
+      countedItems: sql<number>`(select count(*)::int from inventory_items ii where ii.inventory_id = ${inventories.id} and (ii.counted_quantity is not null or ii.recount_quantity is not null))`,
     })
     .from(inventories)
     .leftJoin(users, eq(inventories.openedBy, users.id))
@@ -51,6 +53,8 @@ export async function POST(req: Request) {
     ? body.productIds
     : [];
 
+  const categoryId = typeof body?.categoryId === "string" && body.categoryId ? body.categoryId : null;
+
   if (!description) {
     return NextResponse.json(
       { error: "Informe uma descrição para o inventário." },
@@ -58,7 +62,9 @@ export async function POST(req: Request) {
     );
   }
 
-  const created = await db.transaction(async (tx) => {
+  let created;
+  try {
+    created = await db.transaction(async (tx) => {
     const code = `INV-${Date.now().toString().slice(-6)}`;
     const [inv] = await tx
       .insert(inventories)
@@ -78,6 +84,7 @@ export async function POST(req: Request) {
       eq(products.status, "active"),
       eq(products.trackStock, true),
     ];
+    if (categoryId) prodConds.push(eq(products.categoryId, categoryId));
     if (productIds.length > 0) {
       prodConds.push(inArray(products.id, productIds));
     }
@@ -97,7 +104,10 @@ export async function POST(req: Request) {
       )
       .where(and(...prodConds));
 
-    if (prods.length > 0) {
+    if (prods.length === 0) {
+      throw new Error("EMPTY_SCOPE");
+    }
+    {
       await tx.insert(inventoryItems).values(
         prods.map((p) => ({
           inventoryId: inv.id,
@@ -109,6 +119,15 @@ export async function POST(req: Request) {
 
     return inv;
   });
+  } catch (err) {
+    if (err instanceof Error && err.message === "EMPTY_SCOPE") {
+      return NextResponse.json(
+        { error: "Nenhum produto ativo com controle de estoque neste filtro." },
+        { status: 400 }
+      );
+    }
+    throw err;
+  }
 
   return NextResponse.json({ item: created }, { status: 201 });
 }

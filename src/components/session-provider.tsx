@@ -136,6 +136,11 @@ export function SessionProvider({
 
   const logout = useCallback(async () => {
     await fetch("/api/auth/logout", { method: "POST" });
+    // Em computador compartilhado, o catálogo e a página do PDV guardados no aparelho saem junto.
+    try {
+      const { clearOfflineCatalog } = await import("@/lib/offline-db");
+      await clearOfflineCatalog();
+    } catch {}
     setSession(null);
     router.push("/login");
     router.refresh();

@@ -728,9 +728,13 @@ export const sales = pgTable(
     cancelledBy: uuid("cancelled_by").references(() => users.id, { onDelete: "set null" }),
     cancelReason: text("cancel_reason"),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    clientRef: varchar("client_ref", { length: 64 }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
+    uniqueIndex("sales_client_ref_uidx")
+      .on(table.companyId, table.clientRef)
+      .where(sql`${table.clientRef} is not null`),
     index("sales_company_est_idx").on(table.companyId, table.establishmentId),
     index("sales_date_idx").on(table.companyId, table.createdAt),
     index("sales_status_idx").on(table.companyId, table.status),

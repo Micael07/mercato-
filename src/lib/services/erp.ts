@@ -229,6 +229,8 @@ export async function approveInventoryTx(params: {
   inventoryId: string;
   userId: string;
   userName?: string;
+  /** Ignora os itens ainda sem contagem (o saldo deles não é alterado). */
+  ignoreUncounted?: boolean;
 }) {
   return db.transaction(async (tx) => {
     const [inv] = await tx
@@ -266,6 +268,7 @@ export async function approveInventoryTx(params: {
           : null;
 
       if (finalCount === null) {
+        if (params.ignoreUncounted) continue;
         throw new DomainError(
           "Todos os itens do inventário precisam ser contados antes da aprovação."
         );
@@ -519,7 +522,13 @@ export interface CompleteSaleInput {
     productId: string;
     quantity: number;
     discountAmount?: number;
+    /** Só considerado em venda offline: preço que o cliente viu no caixa. */
+    unitPrice?: number;
   }>;
+  /** Venda registrada sem internet e enviada depois (sincronização). */
+  offline?: { occurredAt?: Date | null };
+  /** Identificador gerado no aparelho: reenviar a mesma venda nunca duplica. */
+  clientRef?: string | null;
   payments: Array<{
     paymentMethodId?: string | null;
     paymentMethodCode: string;
@@ -604,6 +613,7 @@ export async function completeSaleTx(input: CompleteSaleInput) {
       );
     const prodMap = new Map(prodRows.map((p) => [p.id, p]));
 
+    const offlineNotes: string[] = [];
     let subtotal = 0;
     let itemDiscountSum = 0;
     const preparedItems: Array<{
@@ -616,7 +626,7 @@ export async function completeSaleTx(input: CompleteSaleInput) {
 
     for (const item of input.items) {
       const prod = prodMap.get(item.productId);
-      if (!prod || prod.status !== "active") {
+      if (!prod || (prod.status !== "active" && !input.offline)) {
         throw new DomainError("Produto inválido ou inativo no carrinho.");
       }
       if (!Number.isFinite(item.quantity) || item.quantity <= 0) {
@@ -627,7 +637,19 @@ export async function completeSaleTx(input: CompleteSaleInput) {
           `Produto "${prod.name}" não permite venda fracionada.`
         );
       }
-      const unitPrice = toNumber(prod.salePrice);
+      let unitPrice = toNumber(prod.salePrice);
+      if (
+        input.offline &&
+        typeof item.unitPrice === "number" &&
+        Number.isFinite(item.unitPrice) &&
+        item.unitPrice >= 0 &&
+        Math.abs(item.unitPrice - unitPrice) > 0.004
+      ) {
+        offlineNotes.push(
+          `${prod.name}: preço offline ${item.unitPrice.toFixed(2)} (cadastro atual ${unitPrice.toFixed(2)})`
+        );
+        unitPrice = roundMoney(item.unitPrice);
+      }
       const lineGross = roundMoney(unitPrice * item.quantity);
       const disc = roundMoney(item.discountAmount ?? 0);
       if (disc < 0 || disc > lineGross) {
@@ -671,7 +693,10 @@ export async function completeSaleTx(input: CompleteSaleInput) {
               input.operatorMaxDiscountPercent
             );
 
-      if (discountPct > roleLimit + 0.01) {
+      if (discountPct > roleLimit + 0.01 && input.offline) {
+        // A venda já aconteceu no balcão: registra e sinaliza, em vez de perder a venda.
+        offlineNotes.push(`Desconto de ${discountPct.toFixed(1)}% acima do limite (${roleLimit.toFixed(1)}%)`);
+      } else if (discountPct > roleLimit + 0.01) {
         throw new DomainError(
           `Desconto de ${discountPct.toFixed(1)}% excede o limite permitido (${roleLimit.toFixed(1)}%).`,
           403
@@ -828,7 +853,12 @@ export async function completeSaleTx(input: CompleteSaleInput) {
         surchargeTotal: surchargeTotal.toFixed(2),
         total: total.toFixed(2),
         changeAmount: changeAmount.toFixed(2),
-        notes: input.notes ?? null,
+        notes:
+          [input.notes, input.offline ? "Venda feita offline" : null, ...offlineNotes]
+            .filter(Boolean)
+            .join(" | ") || null,
+        clientRef: input.clientRef ?? null,
+        ...(input.offline?.occurredAt ? { createdAt: input.offline.occurredAt } : {}),
       })
       .returning();
 
@@ -858,6 +888,7 @@ export async function completeSaleTx(input: CompleteSaleInput) {
           userId: input.operatorId,
           userName: input.operatorName,
           justification: `Saída por venda PDV #${saleNumber}`,
+          ...(input.offline ? { allowNegativeOverride: true } : {}),
         });
       }
     }

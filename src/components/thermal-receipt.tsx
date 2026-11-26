@@ -10,6 +10,8 @@ export interface ReceiptData {
   establishmentAddress?: string | null;
   establishmentPhone?: string | null;
   saleNumber: number;
+  /** Rótulo no lugar do número (ex.: venda offline com número provisório). */
+  saleLabel?: string;
   createdAt: string;
   operatorName: string;
   customerName?: string | null;
@@ -49,7 +51,7 @@ export function ThermalReceipt({ data }: { data: ReceiptData }) {
       <div className="border-b border-dashed border-slate-400 py-2">
         <div className="flex justify-between">
           <span>CUPOM NÃO FISCAL</span>
-          <span className="font-bold">Nº #{data.saleNumber}</span>
+          <span className="font-bold">Nº {data.saleLabel ?? `#${data.saleNumber}`}</span>
         </div>
         <p>Data: {formatDateTime(data.createdAt)}</p>
         <p>Operador: {data.operatorName}</p>

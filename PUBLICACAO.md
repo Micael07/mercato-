@@ -37,3 +37,15 @@
 - Backup: Configurações → "Baixar backup completo" (ZIP de CSVs, sem senhas). O administrador master também baixa o de cada empresa.
 - Lembrete de contas a pagar aparece só para administrador e gerente.
 - Limitação: a validade é uma data por produto (a mais próxima), não por lote.
+
+## Migração 010 — PDV offline
+- Roda sozinha no build (`sales.client_ref` + índice único parcial).
+- O PDV precisa ser aberto **uma vez com internet** em cada aparelho; depois abre e vende sem conexão (catálogo e tela ficam guardados no aparelho; sair do sistema apaga esse cache).
+- Vendas offline entram numa fila local e são enviadas sozinhas ao voltar a conexão; o identificador da venda impede duplicar.
+- Regras offline: preço do balcão é respeitado (divergência fica na observação da venda), estoque pode ficar negativo, desconto acima do limite é registrado com aviso. Crediário, abrir caixa, suspender e retomar vendas exigem internet.
+- O número definitivo da venda só existe depois da sincronização (o cupom offline sai como "Nº OFFLINE").
+- Se o caixa estiver fechado na hora do envio, a venda aguarda (reabra o caixa). Vendas recusadas aparecem na fila com o motivo.
+
+## Inventário
+- Contagem por categoria, folha de contagem cega para impressão, resumo de sobras/faltas antes de aprovar, opção de aprovar ignorando itens não contados.
+- Exclusão: inventário em contagem é descartado sem efeito; inventário aprovado só é excluído por administrador/gerente e **não desfaz** os ajustes de estoque.

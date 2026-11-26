@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import {
   Search, Plus, Minus, PauseCircle, PlayCircle, CreditCard, UserPlus,
   Printer, Wallet, ShoppingCart, X, UserRound, PackageSearch,
-  ChevronLeft, ChevronRight, Info, RefreshCw, Banknote, ReceiptText,
+  ChevronLeft, ChevronRight, Info, RefreshCw, Banknote, ReceiptText, WifiOff, CloudUpload,
 } from "lucide-react";
 import { useSession } from "@/components/session-provider";
 import { useToast } from "@/components/ui/toast";
@@ -12,6 +12,9 @@ import { formatCnpjCpf, formatCurrency, formatDateTime, roundMoney } from "@/lib
 import { calculatePosTotals, formatQuantity, quantityIssue, restoredGlobalDiscount, type PosCartLine, type PosProduct } from "@/lib/pos";
 import { Button, ConfirmDialog, Field, Input, Modal, Select } from "@/components/ui/primitives";
 import { ThermalReceipt, type ReceiptData } from "@/components/thermal-receipt";
+import { isNetworkError, usePdvOffline } from "@/lib/use-pdv-offline";
+import { newClientRef } from "@/lib/offline-db";
+import type { SyncOutcome } from "@/lib/offline-sync";
 
 interface Customer { id: string; name: string; document: string | null; phone?: string | null }
 interface PaymentMethod { id: string; name: string; code: string; allowsInstallments: boolean; maxInstallments: number; isActive?: boolean }
@@ -41,7 +44,7 @@ export default function PdvPage() {
   const searchRegion = useRef<HTMLDivElement>(null);
   const [products, setProducts] = useState<PosProduct[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [methods, setMethods] = useState<PaymentMethod[]>([]);
+  const [allMethods, setMethods] = useState<PaymentMethod[]>([]);
   const [register, setRegister] = useState<CashRegister | null>(null);
   const [suspended, setSuspended] = useState<SuspendedSale[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,6 +81,20 @@ export default function PdvPage() {
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
   const [lastReceipt, setLastReceipt] = useState<ReceiptData | null>(null);
 
+  const [queueModal, setQueueModal] = useState(false);
+  const [discardRef, setDiscardRef] = useState<string | null>(null);
+  const lastCatalogAt = useRef(0);
+  const off = usePdvOffline({
+    userId: session?.user.id,
+    companyId: session?.company.id,
+    establishmentId: session?.establishment.id,
+    onSynced: (outcome) => handleSynced(outcome),
+  });
+  const offRef = useRef(off);
+  useEffect(() => { offRef.current = off; });
+  // Crediário depende do limite do cliente no servidor: só com internet.
+  const methods = off.online ? allMethods : allMethods.filter((method) => method.code !== "store_credit");
+
   const canDiscount = hasPermission("sales.discount");
   const totals = useMemo(() => calculatePosTotals(cart, discount, surcharge), [cart, discount, surcharge]);
   const selectedCustomer = customers.find((customer) => customer.id === customerId);
@@ -103,8 +120,24 @@ export default function PdvPage() {
       setRegister(cashData.registers.find((item) => item.userId === session?.user.id && item.status === "open") || null);
       setSuspended(suspendedData.items);
       setLoadError(null);
+      const mine = cashData.registers.find((item) => item.userId === session?.user.id && item.status === "open") || null;
+      void offRef.current.saveMeta({ customers: customerData.items, methods: activeMethods, register: mine });
+      if (Date.now() - lastCatalogAt.current > 120000) { lastCatalogAt.current = Date.now(); void offRef.current.cacheCatalog().catch(() => {}); }
     } catch (failure) {
-      if (!signal?.aborted) setLoadError(failure instanceof Error ? failure.message : "Falha ao carregar o ponto de venda.");
+      if (signal?.aborted) return;
+      if (isNetworkError(failure)) {
+        const meta = await offRef.current.loadMeta<{ customers: Customer[]; methods: PaymentMethod[]; register: CashRegister | null }>();
+        if (meta) {
+          setCustomers(meta.customers); setMethods(meta.methods);
+          setCondition((value) => meta.methods.some((method) => method.code === value) ? value : meta.methods[0]?.code || "");
+          setRegister(meta.register); setSuspended([]); setLoadError(null);
+          offRef.current.setOnline(false);
+          return;
+        }
+        setLoadError("Sem conexão e sem dados guardados neste aparelho. Abra o PDV uma vez com internet.");
+        return;
+      }
+      setLoadError(failure instanceof Error ? failure.message : "Falha ao carregar o ponto de venda.");
     } finally { if (!signal?.aborted) setLoading(false); }
   }, [session?.user.id]);
 
@@ -119,7 +152,18 @@ export default function PdvPage() {
     const timer = setTimeout(() => {
       setProductsLoading(true);
       const parameters = new URLSearchParams({ q: query, offset: String(productOffset), limit: "50" });
-      request<ProductResponse>(`/api/pos/products?${parameters}`, { signal: abort.signal })
+      const fromDevice = async (): Promise<ProductResponse> => {
+        const catalog = await offRef.current.loadCatalog();
+        const term = query.trim().toLocaleLowerCase("pt-BR");
+        const found = (catalog?.items ?? [])
+          .filter((p) => !term || [p.name, p.sku, p.barcode, p.internalCode].some((v) => v?.toLocaleLowerCase("pt-BR").includes(term)))
+          .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+        return { items: found.slice(productOffset, productOffset + 50), hasMore: found.length > productOffset + 50 };
+      };
+      (off.online ? request<ProductResponse>(`/api/pos/products?${parameters}`, { signal: abort.signal }).catch((failure: unknown) => {
+        if (isNetworkError(failure) && !abort.signal.aborted) { offRef.current.setOnline(false); return fromDevice(); }
+        throw failure;
+      }) : fromDevice())
         .then((data) => {
           if (abort.signal.aborted) return;
           setProducts(data.items); setHasMore(data.hasMore); setResolvedQuery(query); setResolvedOffset(productOffset);
@@ -130,7 +174,7 @@ export default function PdvPage() {
         .finally(() => { if (!abort.signal.aborted) setProductsLoading(false); });
     }, query ? 160 : 0);
     return () => { clearTimeout(timer); abort.abort(); };
-  }, [query, productOffset, productRevision, session?.company.id, session?.establishment.id]);
+  }, [query, productOffset, productRevision, off.online, session?.company.id, session?.establishment.id]);
 
   useEffect(() => {
     const outside = (event: PointerEvent) => { if (event.target instanceof Node && !searchRegion.current?.contains(event.target)) setSearchOpen(false); };
@@ -199,7 +243,9 @@ export default function PdvPage() {
     setCheckoutModal(true);
   }
   async function openCash(event: FormEvent) {
-    event.preventDefault(); setBusy(true);
+    event.preventDefault();
+    if (!off.online) { toast({ type: "warning", title: "Abrir o caixa precisa de internet." }); return; }
+    setBusy(true);
     try {
       const data = await request<{ register: CashRegister }>("/api/cash-registers", json({ action: "open", terminalName, openingAmount: Number(openingAmount) }));
       setRegister({ ...data.register, currentBalance: Number(data.register.currentBalance) }); setCashModal(false);
@@ -212,13 +258,23 @@ export default function PdvPage() {
     const cash = payments.filter((payment) => payment.code === "cash").reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
     if (change > cash + .009) { toast({ type: "warning", title: "O troco deve sair de um pagamento em dinheiro." }); return; }
     setBusy(true);
+    const clientRef = newClientRef();
+    const occurredAt = new Date().toISOString();
+    const payload = {
+      status: "completed", clientRef, occurredAt, cashRegisterId: register?.id || null, customerId: customerId || null, suspendedSaleId: resumedId,
+      discountTotal: discount, surchargeTotal: surcharge,
+      items: cart.map((line) => ({ productId: line.product.id, quantity: line.quantity, discountAmount: line.discountAmount, unitPrice: line.product.salePrice })),
+      payments: payments.map((payment) => { const method = methods.find((item) => item.code === payment.code); return { paymentMethodId: method?.id, paymentMethodCode: payment.code, paymentMethodName: method?.name, amount: Number(payment.amount), installments: payment.installments }; }),
+    };
     try {
-      const data = await request<SaleResponse>("/api/sales", json({
-        status: "completed", cashRegisterId: register?.id || null, customerId: customerId || null, suspendedSaleId: resumedId,
-        discountTotal: discount, surchargeTotal: surcharge,
-        items: cart.map((line) => ({ productId: line.product.id, quantity: line.quantity, discountAmount: line.discountAmount })),
-        payments: payments.map((payment) => { const method = methods.find((item) => item.code === payment.code); return { paymentMethodId: method?.id, paymentMethodCode: payment.code, paymentMethodName: method?.name, amount: Number(payment.amount), installments: payment.installments }; }),
-      }));
+      if (!off.online) { await saveOffline(payload); return; }
+      let data: SaleResponse;
+      try { data = await request<SaleResponse>("/api/sales", json(payload)); }
+      catch (failure) {
+        // Sem resposta do servidor: guarda a venda com o mesmo identificador (reenviar nunca duplica).
+        if (isNetworkError(failure)) { off.setOnline(false); await saveOffline(payload); return; }
+        throw failure;
+      }
       const document: ReceiptData = {
         companyName: session?.company.tradeName || "", companyCnpj: session?.company.cnpj || "",
         establishmentName: session?.establishment.name || "", establishmentAddress: session?.establishment.address, establishmentPhone: session?.establishment.phone,
@@ -234,8 +290,39 @@ export default function PdvPage() {
     } catch (failure) { toast({ type: "error", title: failure instanceof Error ? failure.message : "Não foi possível concluir a venda." }); }
     finally { setBusy(false); }
   }
+  async function saveOffline(payload: { clientRef: string; occurredAt: string; items: Array<{ productId: string; quantity: number }> } & Record<string, unknown>) {
+    if (!session) return;
+    const lines = cart.map((line) => ({ line, gross: roundMoney(line.product.salePrice * line.quantity) }));
+    const document: ReceiptData = {
+      companyName: session.company.tradeName || "", companyCnpj: session.company.cnpj || "",
+      establishmentName: session.establishment.name || "", establishmentAddress: session.establishment.address, establishmentPhone: session.establishment.phone,
+      operatorName: session.user.name || "", customerName: selectedCustomer?.name, customerDocument: selectedCustomer?.document,
+      saleNumber: 0, saleLabel: "OFFLINE", createdAt: payload.occurredAt,
+      subtotal: totals.subtotal, discountTotal: totals.discount, surchargeTotal: surcharge, total: totals.total, changeAmount: change,
+      receiptFooter: `${session.settings.receiptFooter || ""}\nVENDA OFFLINE — número definitivo após a sincronização.`.trim(),
+      items: lines.map(({ line, gross }) => ({ productName: line.product.name, sku: line.product.sku, quantity: line.quantity, unitPrice: line.product.salePrice, discountAmount: line.discountAmount, total: roundMoney(gross - line.discountAmount) })),
+      payments: payments.map((payment) => ({ paymentMethodName: methods.find((item) => item.code === payment.code)?.name || payment.code, amount: Number(payment.amount), installments: payment.installments })),
+    };
+    try {
+      await off.enqueue({ clientRef: payload.clientRef, userId: session.user.id, companyId: session.company.id, establishmentId: session.establishment.id, occurredAt: payload.occurredAt, total: totals.total, payload: { ...payload, offline: true }, receipt: document });
+    } catch {
+      toast({ type: "error", title: "Não foi possível guardar a venda neste aparelho.", description: "Sem conexão e sem espaço de armazenamento local. Não entregue a mercadoria sem registrar." });
+      return;
+    }
+    await off.adjustLocalStock(payload.items);
+    setProducts((current) => current.map((product) => { const sold = payload.items.find((item) => item.productId === product.id); return sold ? { ...product, currentStock: Number((product.currentStock - sold.quantity).toFixed(3)) } : product; }));
+    setReceipt(document); setLastReceipt(document); setCheckoutModal(false); clearSale();
+    toast({ type: "info", title: "Venda salva neste aparelho (offline).", description: "Será enviada sozinha quando a internet voltar." });
+  }
+  function handleSynced(outcome: SyncOutcome) {
+    if (outcome.synced) toast({ type: "success", title: `${outcome.synced} venda(s) offline enviada(s) ao sistema.` });
+    if (outcome.failed) toast({ type: "warning", title: `${outcome.failed} venda(s) offline precisam de revisão.`, description: "Abra a fila no aviso de conexão para ver o motivo." });
+    if (outcome.authExpired) toast({ type: "warning", title: "Sessão expirada.", description: "Entre novamente para enviar as vendas guardadas." });
+    void loadData(); setResolvedQuery(null); setProductRevision((value) => value + 1);
+  }
   async function suspendSale() {
     if (!cart.length || busy) return;
+    if (!off.online) { toast({ type: "warning", title: "Suspender venda só funciona com internet." }); return; }
     setBusy(true);
     try {
       const data = await request<SaleResponse>("/api/sales", json({ status: "suspended", customerId: customerId || null, suspendedSaleId: resumedId, discountTotal: discount, surchargeTotal: surcharge, items: cart.map((line) => ({ productId: line.product.id, quantity: line.quantity, discountAmount: line.discountAmount })), payments: [] }));
@@ -244,6 +331,7 @@ export default function PdvPage() {
     finally { setBusy(false); }
   }
   async function resumeSale(id: string) {
+    if (!off.online) { toast({ type: "warning", title: "Retomar venda suspensa só funciona com internet." }); return; }
     if (cart.length) { toast({ type: "warning", title: "Suspenda ou limpe a venda atual antes de retomar outra." }); return; }
     setBusy(true);
     try {
@@ -287,6 +375,13 @@ export default function PdvPage() {
       <div className="pos-page-bar no-print">
         <h1 className="pos-page-title"><ShoppingCart className="h-[18px] w-[18px]" />Ponto de venda</h1>
         <div className="pos-toolbar">
+          {(!off.online || off.queue.length > 0) && (
+            <button type="button" onClick={() => setQueueModal(true)} className={`flex items-center gap-1.5 rounded border px-2.5 py-1 text-xs font-semibold ${off.queue.some((q) => q.status === "error") ? "border-red-300 bg-red-50 text-red-700" : !off.online ? "border-amber-300 bg-amber-50 text-amber-800" : "border-sky-300 bg-sky-50 text-sky-800"}`} title="Conexão e vendas guardadas neste aparelho">
+              {off.online ? <CloudUpload className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
+              {off.online ? (off.syncing ? "Enviando…" : "Vendas a enviar") : "Sem internet — modo offline"}
+              {off.queue.length > 0 && <span className="rounded bg-white/70 px-1.5">{off.queue.length}</span>}
+            </button>
+          )}
           <Button onClick={() => cart.length ? setNewSaleConfirm(true) : clearSale()} disabled={busy}><Plus className="h-3.5 w-3.5" />Novo</Button>
           <Button onClick={openCheckout} disabled={!cart.length || loading || busy}><Banknote className="h-3.5 w-3.5" />Receber</Button>
           <Button variant="warning" onClick={() => setReceipt(lastReceipt)} disabled={!lastReceipt || busy} title="Imprimir o último comprovante desta sessão"><Printer className="h-3.5 w-3.5" />Imprimir</Button>
@@ -350,6 +445,23 @@ export default function PdvPage() {
       <Modal open={suspendedModal} onClose={() => setSuspendedModal(false)} title="Vendas suspensas" size="lg"><div className="overflow-x-auto"><table className="pos-lookup-table"><thead><tr><th>Nº venda</th><th>Cliente</th><th>Data</th><th className="text-right">Total</th><th><span className="sr-only">Ação</span></th></tr></thead><tbody>{suspended.length ? suspended.map((sale) => <tr key={sale.id}><td>#{sale.saleNumber}</td><td>{sale.customerName || "Consumidor final"}</td><td className="whitespace-nowrap text-[11px]">{formatDateTime(sale.createdAt)}</td><td className="whitespace-nowrap text-right">{formatCurrency(sale.total)}</td><td><Button size="sm" disabled={busy} onClick={() => void resumeSale(sale.id)}><PlayCircle className="h-3 w-3" />Retomar</Button></td></tr>) : <tr><td colSpan={5} className="text-center text-slate-400">Não há vendas suspensas.</td></tr>}</tbody></table></div></Modal>
       <Modal open={Boolean(receipt)} onClose={() => setReceipt(null)} title="Comprovante de venda" size="sm" footer={<><Button variant="outline" onClick={() => setReceipt(null)}>Fechar</Button><Button variant="warning" onClick={() => window.print()}><Printer className="h-3.5 w-3.5" />Imprimir / salvar PDF</Button></>}>{receipt && <ThermalReceipt data={receipt} />}</Modal>
       <ConfirmDialog open={newSaleConfirm} onClose={() => setNewSaleConfirm(false)} onConfirm={clearSale} title="Iniciar uma nova venda?" description="Os itens desta venda em edição serão descartados. Se quiser retomá-la depois, use Suspender. Nenhuma venda concluída ou saldo de estoque será alterado." confirmLabel="Limpar e iniciar nova venda" danger />
+      <Modal open={queueModal} onClose={() => setQueueModal(false)} title="Conexão e vendas offline" subtitle={off.online ? "Conectado ao sistema." : "Sem internet: o caixa continua vendendo e guarda as vendas neste aparelho."} size="md" footer={<><Button variant="outline" onClick={() => setQueueModal(false)}>Fechar</Button><Button onClick={() => void off.runSync()} loading={off.syncing} disabled={!off.online || !off.queue.length}><CloudUpload className="h-3.5 w-3.5" />Enviar agora</Button></>}>
+        {off.queue.length === 0 ? <p className="text-xs text-slate-500">Nenhuma venda aguardando envio.</p> : (
+          <ul className="divide-y divide-slate-100 text-xs">
+            {off.queue.map((sale) => (
+              <li key={sale.clientRef} className="flex items-start justify-between gap-3 py-2">
+                <div>
+                  <p className="font-semibold text-slate-800">Offline nº {sale.localNumber} · {formatCurrency(sale.total)}</p>
+                  <p className="text-slate-500">{formatDateTime(sale.occurredAt)}</p>
+                  {sale.status === "error" ? <p className="mt-0.5 text-red-700">Recusada pelo sistema: {sale.lastError}. Revise e, se necessário, lance a venda manualmente e descarte esta.</p> : sale.lastError ? <p className="mt-0.5 text-amber-700">Aguardando: {sale.lastError}</p> : <p className="text-sky-700">Aguardando conexão</p>}
+                </div>
+                {sale.status === "error" && <Button size="sm" variant="outline" onClick={() => setDiscardRef(sale.clientRef)}>Descartar</Button>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Modal>
+      <ConfirmDialog open={Boolean(discardRef)} onClose={() => setDiscardRef(null)} onConfirm={() => { if (discardRef) void off.discard(discardRef); setDiscardRef(null); }} danger title="Descartar venda offline" confirmLabel="Descartar" description="Esta venda foi recusada pelo sistema e NÃO está registrada. Descartar apaga o registro guardado neste aparelho. Confirme só se já lançou a venda de outra forma." />
     </div>
   );
 }
