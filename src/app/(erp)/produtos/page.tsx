@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import React, { useCallback, useEffect, useState } from "react";
 import {
   Plus,
@@ -127,10 +128,6 @@ export default function ProdutosPage() {
 
   const [catModal, setCatModal] = useState(false);
   const [newCatName, setNewCatName] = useState("");
-  const [importModal, setImportModal] = useState(false);
-  const [csvText, setCsvText] = useState(
-    "sku;barcode;name;unit;costPrice;salePrice;minStock;stock\nEX-001;7890001112223;Produto Exemplo;UN;10.00;24.90;5;20"
-  );
   const [inactivateTarget, setInactivateTarget] = useState<ProductRow | null>(
     null
   );
@@ -273,49 +270,6 @@ export default function ProdutosPage() {
       setNewCatName("");
       setCatModal(false);
       load();
-    }
-  };
-
-  const handleImportCsv = async () => {
-    const lines = csvText
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
-    if (lines.length < 2) {
-      toast({ type: "warning", title: "Informe cabeçalho e ao menos 1 linha." });
-      return;
-    }
-    const headers = lines[0].split(";").map((h) => h.trim());
-    const rows = lines.slice(1).map((line) => {
-      const cols = line.split(";");
-      const obj: Record<string, string> = {};
-      headers.forEach((h, i) => {
-        obj[h] = (cols[i] ?? "").trim();
-      });
-      return obj;
-    });
-    setSubmitting(true);
-    try {
-      const res = await fetch("/api/products/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        toast({
-          type: "success",
-          title: `${data.imported} produto(s) importado(s)`,
-          description:
-            data.errors?.length > 0 ? `${data.errors.length} linha(s) ignorada(s)` : undefined,
-        });
-        setImportModal(false);
-        load();
-      } else {
-        toast({ type: "error", title: data.error });
-      }
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -482,10 +436,12 @@ export default function ProdutosPage() {
                 <FolderPlus className="h-4 w-4" />
                 Categorias
               </Button>
-              <Button variant="outline" onClick={() => setImportModal(true)}>
-                <Upload className="h-4 w-4" />
-                Importar CSV
-              </Button>
+              <Link href="/produtos/importar">
+                <Button variant="outline">
+                  <Upload className="h-4 w-4" />
+                  Importar planilha
+                </Button>
+              </Link>
             </>
           )}
           <Button
@@ -860,32 +816,6 @@ export default function ProdutosPage() {
             <Button type="submit">Adicionar</Button>
           </div>
         </form>
-      </Modal>
-
-      {/* Modal: Import CSV */}
-      <Modal
-        open={importModal}
-        onClose={() => setImportModal(false)}
-        title="Importar Produtos via CSV"
-        subtitle="Use ponto e vírgula (;) como separador"
-        size="lg"
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setImportModal(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={handleImportCsv} loading={submitting}>
-              Processar Importação
-            </Button>
-          </>
-        }
-      >
-        <Textarea
-          rows={8}
-          className="font-mono text-xs"
-          value={csvText}
-          onChange={(e) => setCsvText(e.target.value)}
-        />
       </Modal>
 
       <ConfirmDialog

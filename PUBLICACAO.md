@@ -49,3 +49,9 @@
 ## Inventário
 - Contagem por categoria, folha de contagem cega para impressão, resumo de sobras/faltas antes de aprovar, opção de aprovar ignorando itens não contados.
 - Exclusão: inventário em contagem é descartado sem efeito; inventário aprovado só é excluído por administrador/gerente e **não desfaz** os ajustes de estoque.
+
+## Importação de produtos por planilha
+- Produtos → Importar planilha: .xlsx ou CSV (UTF-8 ou Excel brasileiro), até 5.000 produtos por vez, colunas reconhecidas pelo título, conferência por linha (dry-run) antes de gravar, categorias criadas automaticamente, estoque inicial com movimentação "IMPORTAÇÃO" e histórico de preço.
+- Produto existente (mesmo SKU ou código de barras): ignorar ou atualizar (preço, categoria etc.; o estoque de produto existente nunca é alterado pela planilha).
+- Linhas com erro ficam de fora e podem ser baixadas num relatório. Sem SKU na planilha, o sistema gera P000001…
+- Não há migração nova.

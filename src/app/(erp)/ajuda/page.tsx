@@ -22,6 +22,7 @@ const GROUPS: Group[] = [
   },
   {
     id: "estoque", title: "Produtos e estoque", items: [
+      { q: "Como cadastro muitos produtos de uma vez?", a: "Produtos → Importar planilha. Envie um Excel (.xlsx) ou CSV com ao menos descrição e preço de venda; as colunas são reconhecidas pelo título (há um modelo para baixar). O sistema mostra uma conferência com os erros por linha antes de gravar, cria as categorias novas e lança o estoque inicial. Até 5.000 produtos por vez." },
       { q: "Como cadastro um produto?", a: "Produtos → Cadastro de produtos → Novo. Informe nome, unidade, preço de venda e, se quiser, código de barras. O preço de custo só aparece para quem tem permissão." },
       { q: "Como dou entrada de mercadoria?", a: "Duas formas: receba um pedido em Compras → Pedidos de compra (atualiza estoque e financeiro) ou lance uma entrada manual em Produtos → Movimentação de estoque." },
       { q: "Como cadastro um fornecedor pelo CNPJ?", a: "Em Fornecedores → Novo Fornecedor, digite o CNPJ. Ao completar os 14 números, o sistema busca razão social, fantasia, endereço, telefone e e-mail na base pública e preenche o formulário. Confira os dados e complete contato e condição de pagamento. Se a consulta falhar, preencha à mão." },
