@@ -78,6 +78,10 @@ export default function VendasPage() {
   const [status, setStatus] = useState("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [operator, setOperator] = useState("all");
+  const [payment, setPayment] = useState("all");
+  const [search, setSearch] = useState("");
+  const [tab, setTab] = useState<"items" | "payments" | "notes">("items");
 
   const [detail, setDetail] = useState<SaleDetail | null>(null);
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
@@ -201,6 +205,20 @@ export default function VendasPage() {
     }
   };
 
+  const operators = Array.from(new Set(items.map((s) => s.operatorName).filter(Boolean))) as string[];
+  const methods = Array.from(new Set(items.flatMap((s) => s.payments.map((p) => p.name))));
+  const visibleSales = items.filter((s) => {
+    if (operator !== "all" && s.operatorName !== operator) return false;
+    if (payment !== "all" && !s.payments.some((p) => p.name === payment)) return false;
+    const q = search.trim().toLowerCase();
+    if (q && !`${s.saleNumber} ${s.customerName ?? "consumidor final"}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  const valid = visibleSales.filter((s) => ["completed", "partially_returned"].includes(s.status));
+  const revenue = valid.reduce((sum, s) => sum + s.total, 0);
+  const discounts = valid.reduce((sum, s) => sum + s.discountTotal, 0);
+  const cancelledCount = visibleSales.filter((s) => s.status === "cancelled").length;
+
   const columns: ColumnDef<SaleRow>[] = [
     {
       key: "saleNumber",
@@ -247,7 +265,7 @@ export default function VendasPage() {
       sortable: true,
       sortValue: (r) => r.total,
       render: (r) => (
-        <span className="font-mono font-semibold tabular-nums text-slate-900">
+        <span className="font-semibold tabular-nums text-slate-900">
           {formatCurrency(r.total)}
         </span>
       ),
@@ -331,12 +349,20 @@ export default function VendasPage() {
         </Button>
       </div>
 
+      <div className="kpi-strip no-print" aria-label="Resumo das vendas listadas">
+        <div><p>Receita</p><strong>{formatCurrency(revenue)}</strong><small>{valid.length} venda(s) válida(s)</small></div>
+        <div><p>Ticket médio</p><strong>{formatCurrency(valid.length ? revenue / valid.length : 0)}</strong><small>por venda concluída</small></div>
+        <div><p>Descontos concedidos</p><strong>{formatCurrency(discounts)}</strong><small>{(revenue + discounts > 0 ? (discounts / (revenue + discounts)) * 100 : 0).toFixed(1).replace(".", ",")}% do bruto</small></div>
+        <div><p>Canceladas</p><strong>{cancelledCount}</strong><small>no filtro atual</small></div>
+      </div>
+
       <div className="no-print">
         <DataTable
-          data={items}
+          data={visibleSales}
           columns={columns}
           rowKey={(r) => r.id}
           loading={loading}
+          onRowClick={(r) => { setTab("items"); void openDetail(r.id, false); }}
           toolbar={
             <>
               <Select
@@ -351,6 +377,21 @@ export default function VendasPage() {
                 <option value="partially_returned">Devolvidas parcial</option>
                 <option value="returned">Devolvidas</option>
                 <option value="cancelled">Canceladas</option>
+              </Select>
+              <Input
+                aria-label="Buscar por número ou cliente"
+                placeholder="Buscar nº ou cliente"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="h-8 w-44 text-xs"
+              />
+              <Select aria-label="Filtrar operador" value={operator} onChange={(e) => setOperator(e.target.value)} className="h-8 w-40 text-xs">
+                <option value="all">Todos os operadores</option>
+                {operators.map((o) => <option key={o} value={o}>{o}</option>)}
+              </Select>
+              <Select aria-label="Filtrar pagamento" value={payment} onChange={(e) => setPayment(e.target.value)} className="h-8 w-40 text-xs">
+                <option value="all">Todas as formas</option>
+                {methods.map((m) => <option key={m} value={m}>{m}</option>)}
               </Select>
               <Input
                 type="date"
@@ -417,19 +458,19 @@ export default function VendasPage() {
               </div>
               <div>
                 <p className="text-slate-500">Subtotal</p>
-                <p className="font-mono font-semibold">
+                <p className="font-semibold tabular-nums">
                   {formatCurrency(detail.sale.subtotal)}
                 </p>
               </div>
               <div>
                 <p className="text-slate-500">Desconto</p>
-                <p className="font-mono font-semibold">
+                <p className="font-semibold tabular-nums">
                   {formatCurrency(detail.sale.discountTotal)}
                 </p>
               </div>
               <div>
                 <p className="text-slate-500">Total líquido</p>
-                <p className="font-mono font-bold text-[#0f4c5c]">
+                <p className="font-bold tabular-nums text-slate-900">
                   {formatCurrency(detail.sale.total)}
                 </p>
               </div>
@@ -441,50 +482,80 @@ export default function VendasPage() {
               </div>
             )}
 
-            <table className="w-full border-collapse text-left">
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-50 text-[11px] uppercase text-slate-500">
-                  <th className="px-2 py-2">Produto</th>
-                  <th className="px-2 py-2 text-right">Qtd</th>
-                  <th className="px-2 py-2 text-right">Devolvido</th>
-                  <th className="px-2 py-2 text-right">Unitário</th>
-                  <th className="px-2 py-2 text-right">Total</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {detail.items.map((it) => (
-                  <tr key={it.id}>
-                    <td className="px-2 py-2 font-medium">
-                      {it.productName}{" "}
-                      <span className="font-mono text-[10px] text-slate-400">
-                        ({it.sku})
-                      </span>
-                    </td>
-                    <td className="px-2 py-2 text-right font-mono">{it.quantity}</td>
-                    <td className="px-2 py-2 text-right font-mono text-amber-700">
-                      {it.returnedQuantity}
-                    </td>
-                    <td className="px-2 py-2 text-right font-mono">
-                      {formatCurrency(it.unitPrice)}
-                    </td>
-                    <td className="px-2 py-2 text-right font-mono font-semibold">
-                      {formatCurrency(it.total)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            <div className="border-t border-slate-200 pt-2">
-              <p className="mb-1 font-semibold text-slate-700">Pagamentos:</p>
-              <div className="flex flex-wrap gap-2">
-                {detail.payments.map((p) => (
-                  <Badge key={p.id} tone="primary">
-                    {p.paymentMethodName}: {formatCurrency(p.amount)}
-                  </Badge>
-                ))}
-              </div>
+            <div className="erp-tabs" role="tablist" aria-label="Detalhes da venda">
+              {([["items", `Itens (${detail.items.length})`], ["payments", `Pagamentos (${detail.payments.length})`], ["notes", "Observações"]] as const).map(([k, label]) => (
+                <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>{label}</button>
+              ))}
             </div>
+
+            {tab === "items" && (
+              <table className="w-full border-collapse text-left">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50 text-[11px] text-slate-500">
+                    <th className="px-2 py-2">Produto</th>
+                    <th className="px-2 py-2 text-right">Qtd</th>
+                    <th className="px-2 py-2 text-right">Devolvido</th>
+                    <th className="px-2 py-2 text-right">Unitário</th>
+                    <th className="px-2 py-2 text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {detail.items.map((it) => (
+                    <tr key={it.id}>
+                      <td className="px-2 py-2 font-medium">
+                        {it.productName} <span className="text-[11px] text-slate-400">({it.sku})</span>
+                      </td>
+                      <td className="px-2 py-2 text-right tabular-nums">{it.quantity}</td>
+                      <td className="px-2 py-2 text-right tabular-nums text-amber-700">{it.returnedQuantity}</td>
+                      <td className="px-2 py-2 text-right tabular-nums">{formatCurrency(it.unitPrice)}</td>
+                      <td className="px-2 py-2 text-right font-semibold tabular-nums">{formatCurrency(it.total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            {tab === "payments" && (
+              <table className="w-full border-collapse text-left">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50 text-[11px] text-slate-500">
+                    <th className="px-2 py-2">Forma de pagamento</th>
+                    <th className="px-2 py-2 text-right">Parcelas</th>
+                    <th className="px-2 py-2 text-right">Valor</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {detail.payments.map((p) => (
+                    <tr key={p.id}>
+                      <td className="px-2 py-2 font-medium">{p.paymentMethodName}</td>
+                      <td className="px-2 py-2 text-right tabular-nums">{p.installments > 1 ? `${p.installments}x` : "À vista"}</td>
+                      <td className="px-2 py-2 text-right font-semibold tabular-nums">{formatCurrency(p.amount)}</td>
+                    </tr>
+                  ))}
+                  {detail.sale.changeAmount > 0 && (
+                    <tr>
+                      <td className="px-2 py-2 text-slate-500" colSpan={2}>Troco devolvido</td>
+                      <td className="px-2 py-2 text-right tabular-nums text-slate-500">{formatCurrency(detail.sale.changeAmount)}</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            )}
+
+            {tab === "notes" && (
+              <dl className="grid grid-cols-[140px_1fr] gap-x-4 gap-y-2 text-xs">
+                <dt className="text-slate-500">Status</dt>
+                <dd>{(STATUS_MAP[detail.sale.status] ?? { label: detail.sale.status }).label}</dd>
+                <dt className="text-slate-500">Operador</dt>
+                <dd>{detail.sale.operatorName || "Sistema"}</dd>
+                <dt className="text-slate-500">Data e hora</dt>
+                <dd>{formatDateTime(detail.sale.createdAt)}</dd>
+                <dt className="text-slate-500">Documento do cliente</dt>
+                <dd>{detail.sale.customerDocument || "—"}</dd>
+                <dt className="text-slate-500">Observações</dt>
+                <dd>{(detail.sale as { notes?: string | null }).notes || "—"}</dd>
+              </dl>
+            )}
           </div>
         )}
       </Modal>

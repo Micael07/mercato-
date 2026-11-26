@@ -55,3 +55,8 @@
 - Produto existente (mesmo SKU ou código de barras): ignorar ou atualizar (preço, categoria etc.; o estoque de produto existente nunca é alterado pela planilha).
 - Linhas com erro ficam de fora e podem ser baixadas num relatório. Sem SKU na planilha, o sistema gera P000001…
 - Não há migração nova.
+
+## Refino visual (tag de reversão: `pre-refino-visual`)
+- Cabeçalhos de painel/página/diálogo brancos com título em peso 600, tabelas mais limpas (sem divisórias verticais, cabeçalho fixo), contraste dos textos auxiliares reforçado, painel inicial com indicador principal em destaque. O PDV não foi alterado.
+- Vendas: faixa de totais, filtros (cliente/nº, operador, forma de pagamento) e detalhe em abas (Itens, Pagamentos, Observações) ao clicar na linha.
+- Para desfazer: `git revert` dos commits após a tag `pre-refino-visual` (ou `git checkout pre-refino-visual -- .` e novo commit).
