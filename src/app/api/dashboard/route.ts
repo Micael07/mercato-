@@ -36,6 +36,12 @@ export async function GET(req: Request) {
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const periodStart = new Date(now.getTime() - days * 86400 * 1000);
   const prevPeriodStart = new Date(periodStart.getTime() - days * 86400 * 1000);
+  // Comparativo mensal: mês atual até hoje x mesmo intervalo do mês anterior.
+  const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const prevMonthWindowEnd = new Date(
+    Math.min(startOfMonth.getTime(), prevMonthStart.getTime() + (now.getTime() - startOfMonth.getTime()))
+  );
+  const salesSince = new Date(Math.min(prevPeriodStart.getTime(), prevMonthStart.getTime()));
 
   // Sales in period + previous period
   const completedSales = canSales
@@ -54,7 +60,7 @@ export async function GET(req: Request) {
             eq(sales.companyId, ctx.company.id),
             eq(sales.establishmentId, ctx.establishment.id),
             eq(sales.status, "completed"),
-            gte(sales.createdAt, prevPeriodStart)
+            gte(sales.createdAt, salesSince)
           )
         )
         .orderBy(desc(sales.createdAt))
@@ -66,6 +72,10 @@ export async function GET(req: Request) {
   );
   const todaySales = completedSales.filter((s) => s.createdAt >= startOfDay);
   const monthSales = completedSales.filter((s) => s.createdAt >= startOfMonth);
+  const prevMonthSales = completedSales.filter(
+    (s) => s.createdAt >= prevMonthStart && s.createdAt < prevMonthWindowEnd
+  );
+  const prevMonthTotal = roundMoney(prevMonthSales.reduce((a, s) => a + toNumber(s.total), 0));
 
   const salesTodayTotal = roundMoney(
     todaySales.reduce((a, s) => a + toNumber(s.total), 0)
@@ -265,6 +275,9 @@ export async function GET(req: Request) {
   let accountsReceivable = null;
   let accountsPayable = null;
   let expensesPeriod = null;
+  let expensesMonth: number | null = null;
+  let prevExpensesMonth: number | null = null;
+  let finance: null | Record<"overdue" | "today" | "upcoming", { receivable: number; payable: number; receivableCount: number; payableCount: number }> = null;
 
   if (canFinance) {
     const entries = await db
@@ -310,6 +323,38 @@ export async function GET(req: Request) {
         )
         .reduce((a, e) => a + toNumber(e.amount), 0)
     );
+
+    const todayStr = nowStr;
+    const horizonStr = dateInTz(new Date(now.getTime() + 14 * 86400 * 1000));
+    const monthStartStr = dateInTz(startOfMonth);
+    const prevMonthStartStr = dateInTz(prevMonthStart);
+    const prevWindowEndStr = dateInTz(prevMonthWindowEnd);
+    const open = entries.filter((e) => e.status === "open" || e.status === "partial");
+    const remaining = (e: (typeof entries)[number]) => toNumber(e.amount) - toNumber(e.paidAmount);
+    const bucket = (filter: (due: string) => boolean) => {
+      const rows = open.filter((e) => filter(e.dueDate));
+      const receivable = rows.filter((e) => e.type === "receivable");
+      const payable = rows.filter((e) => e.type === "payable");
+      return {
+        receivable: roundMoney(receivable.reduce((a, e) => a + remaining(e), 0)),
+        payable: roundMoney(payable.reduce((a, e) => a + remaining(e), 0)),
+        receivableCount: receivable.length,
+        payableCount: payable.length,
+      };
+    };
+    finance = {
+      overdue: bucket((due) => due < todayStr),
+      today: bucket((due) => due === todayStr),
+      upcoming: bucket((due) => due > todayStr && due <= horizonStr),
+    };
+    const payablesBetween = (from: string, to: string) =>
+      roundMoney(
+        entries
+          .filter((e) => e.type === "payable" && e.status !== "cancelled" && e.dueDate >= from && e.dueDate <= to)
+          .reduce((a, e) => a + toNumber(e.amount), 0)
+      );
+    expensesMonth = payablesBetween(monthStartStr, todayStr);
+    prevExpensesMonth = payablesBetween(prevMonthStartStr, prevWindowEndStr);
   }
 
   return NextResponse.json({
@@ -330,7 +375,11 @@ export async function GET(req: Request) {
       accountsReceivable,
       accountsPayable,
       expensesPeriod,
+      expensesMonth,
+      prevExpensesMonth,
+      prevMonthTotal,
     },
+    finance,
     charts: {
       salesByDay,
       salesByPayment,
